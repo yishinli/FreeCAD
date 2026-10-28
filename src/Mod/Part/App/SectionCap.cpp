@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <unordered_map>
 
@@ -37,6 +38,7 @@
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
 #include <Precision.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopoDS_Shape.hxx>
 
 #include "BRepMesh.h"
@@ -251,7 +253,11 @@ std::optional<Part::SectionCap::Segment> SectionCap::triangleCrossing(
 }
 
 
-SectionCap::TriangleSoup SectionCap::meshSolid(const TopoDS_Shape& shape, double deflection)
+SectionCap::TriangleSoup SectionCap::meshSolid(
+    const TopoDS_Shape& shape,
+    double deflection,
+    double angularDeflection
+)
 {
     TriangleSoup soup;
     if (shape.IsNull()) {
@@ -271,7 +277,7 @@ SectionCap::TriangleSoup SectionCap::meshSolid(const TopoDS_Shape& shape, double
         shape,
         accuracy,
         /*isRelative*/ Standard_False,
-        meshAngularDeflection,
+        angularDeflection > 0.0 ? angularDeflection : meshAngularDeflection,
         /*isInParallel*/ Standard_False
     );
 
@@ -288,6 +294,14 @@ SectionCap::TriangleSoup SectionCap::meshSolid(const TopoDS_Shape& shape, double
         soup.indices.push_back(static_cast<int>(facet.I3));
     }
     return soup;
+}
+
+
+bool SectionCap::isClosedSolid(const TopoDS_Shape& shape)
+{
+    return !shape.IsNull() && TopExp_Explorer(shape, TopAbs_SOLID).More()
+        && !TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SHELL).More()
+        && !TopExp_Explorer(shape, TopAbs_SHELL, TopAbs_SOLID).More();
 }
 
 
@@ -441,6 +455,103 @@ std::vector<std::vector<Base::Vector3d>> SectionCap::chainLoops(const std::vecto
 bool SectionCap::isClosedExactly(const std::vector<Base::Vector3d>& loop)
 {
     return loop.size() >= 4 && loop.front() == loop.back();
+}
+
+
+std::vector<std::vector<Base::Vector3d>> SectionCap::bridgeOpenChains(
+    std::vector<std::vector<Base::Vector3d>> loops,
+    double maxGap,
+    std::size_t maxChains
+)
+{
+    std::vector<std::vector<Base::Vector3d>> result;
+    std::vector<std::vector<Base::Vector3d>> open;
+    for (auto& loop : loops) {
+        if (isClosedExactly(loop)) {
+            result.push_back(std::move(loop));
+        }
+        else {
+            open.push_back(std::move(loop));
+        }
+    }
+    if (open.empty() || !(maxGap > 0.0) || open.size() > maxChains) {
+        std::ranges::move(open, std::back_inserter(result));
+        return result;
+    }
+
+    // End 2i is the front of chain i, end 2i + 1 its back. Each end takes at
+    // most one bridge, so the result is always paths and cycles, and any two
+    // free ends may be bridged: shortest first.
+    const std::size_t ends = open.size() * 2;
+    auto endPoint = [&open](std::size_t entry) -> const Base::Vector3d& {
+        const auto& chain = open[entry / 2];
+        return entry % 2 == 0 ? chain.front() : chain.back();
+    };
+    struct Bridge
+    {
+        double length;
+        std::size_t a;
+        std::size_t b;
+    };
+    std::vector<Bridge> candidates;
+    for (std::size_t a = 0; a < ends; ++a) {
+        for (std::size_t b = a + 1; b < ends; ++b) {
+            const double length = Base::Distance(endPoint(a), endPoint(b));
+            if (length <= maxGap) {
+                candidates.push_back({length, a, b});
+            }
+        }
+    }
+    std::ranges::sort(candidates, {}, &Bridge::length);
+
+    constexpr std::size_t none = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> partner(ends, none);
+    for (const Bridge& bridge : candidates) {
+        if (partner[bridge.a] == none && partner[bridge.b] == none) {
+            partner[bridge.a] = bridge.b;
+            partner[bridge.b] = bridge.a;
+        }
+    }
+
+    // Paths are walked from a free end so they come out whole; what is left
+    // after that is cycles.
+    std::vector<bool> walked(open.size(), false);
+    auto walk = [&](std::size_t entry) {
+        std::vector<Base::Vector3d> joined;
+        const std::size_t first = entry;
+        while (true) {
+            const std::size_t chain = entry / 2;
+            walked[chain] = true;
+            const auto& points = open[chain];
+            if (entry % 2 == 0) {
+                joined.insert(joined.end(), points.begin(), points.end());
+            }
+            else {
+                joined.insert(joined.end(), points.rbegin(), points.rend());
+            }
+            const std::size_t next = partner[entry ^ 1U];
+            if (next == none) {
+                break;  // a free end: the path stays open
+            }
+            if (next == first) {
+                joined.push_back(joined.front());  // closed, spelt as chainLoops spells it
+                break;
+            }
+            entry = next;
+        }
+        result.push_back(std::move(joined));
+    };
+    for (std::size_t entry = 0; entry < ends; ++entry) {
+        if (!walked[entry / 2] && partner[entry] == none) {
+            walk(entry);
+        }
+    }
+    for (std::size_t chain = 0; chain < open.size(); ++chain) {
+        if (!walked[chain]) {
+            walk(chain * 2);
+        }
+    }
+    return result;
 }
 
 

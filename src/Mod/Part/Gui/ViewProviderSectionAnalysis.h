@@ -308,6 +308,10 @@ private:
         // moving the plane never costs a pass over the triangles just to decide
         // whether to skip them.
         Base::BoundBox3d bounds;
+        /// Remeshed from a shape whose every face belongs to a solid, so every
+        /// cut through it ought to close and an open chain is a hole in the
+        /// mesh rather than in the part.
+        bool closedSolid = false;
     };
     std::vector<HarvestedBody> harvestCache;
     bool harvestValid = false;
