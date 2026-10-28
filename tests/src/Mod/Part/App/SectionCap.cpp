@@ -19,6 +19,9 @@
 #include <gp_Ax2.hxx>
 #include <TopoDS_Shape.hxx>
 #include <BRep_Builder.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <gp_Pln.hxx>
+#include <TopoDS_Compound.hxx>
 #include <BRepTools.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 
@@ -1152,6 +1155,193 @@ TEST(SectionCapChain, testACutAcrossAHoleGivesTwoClosedLoops)
     // Two strips 4 wide and 20 tall, either side of a bore 12 across. Half a
     // cap drawn and half missing is what this looks like on screen.
     EXPECT_NEAR(soupArea(fillLoops(closed, U, Base::Vector3d(0, 0, 1))), 160.0, 1.0);
+}
+
+namespace
+{
+
+using Chain = std::vector<Base::Vector3d>;
+
+std::size_t countClosed(const std::vector<Chain>& loops)
+{
+    return static_cast<std::size_t>(std::ranges::count_if(loops, isClosedExactly));
+}
+
+/// A 10 x 10 square cut into two open chains, leaving gaps of `gap` at the
+/// middle of the bottom and the top side.
+std::vector<Chain> squareInTwoHalves(double x0, double gap)
+{
+    using Vec = Base::Vector3d;
+    const double h = gap / 2.0;
+    return {
+        {Vec(x0 + 5 - h, 0, 0), Vec(x0, 0, 0), Vec(x0, 10, 0), Vec(x0 + 5 - h, 10, 0)},
+        {Vec(x0 + 5 + h, 10, 0), Vec(x0 + 10, 10, 0), Vec(x0 + 10, 0, 0), Vec(x0 + 5 + h, 0, 0)},
+    };
+}
+
+}  // namespace
+
+TEST(SectionCapBridge, testTwoHalvesOfASquareCloseIntoOneLoop)
+{
+    // Arrange
+    const auto halves = squareInTwoHalves(0, 0.5);
+
+    // Act
+    const auto loops = bridgeOpenChains(halves, 1.0);
+
+    // Assert - one loop, filled with the square's own area
+    ASSERT_EQ(loops.size(), 1);
+    EXPECT_TRUE(isClosedExactly(loops[0]));
+    EXPECT_NEAR(soupArea(fillLoops(loops, U, V)), 100.0, 1e-6);
+}
+
+TEST(SectionCapBridge, testTheOrderAndDirectionOfTheChainsDoNotMatter)
+{
+    auto halves = squareInTwoHalves(0, 0.5);
+    std::ranges::reverse(halves[1]);
+    std::ranges::swap(halves[0], halves[1]);
+
+    const auto loops = bridgeOpenChains(halves, 1.0);
+
+    ASSERT_EQ(loops.size(), 1);
+    EXPECT_NEAR(soupArea(fillLoops(loops, U, V)), 100.0, 1e-6);
+}
+
+TEST(SectionCapBridge, testAChainThatMissesOnlyOneSegmentClosesOnItself)
+{
+    // Three sides of a square, the fourth lost in a hole in the mesh
+    const Chain open = {
+        Base::Vector3d(0, 0, 0),
+        Base::Vector3d(10, 0, 0),
+        Base::Vector3d(10, 10, 0),
+        Base::Vector3d(0, 10, 0),
+    };
+
+    const auto loops = bridgeOpenChains({open}, 10.0);
+
+    ASSERT_EQ(loops.size(), 1);
+    EXPECT_TRUE(isClosedExactly(loops[0]));
+    EXPECT_NEAR(soupArea(fillLoops(loops, U, V)), 100.0, 1e-6);
+}
+
+TEST(SectionCapBridge, testAGapWiderThanAllowedIsLeftOpen)
+{
+    const auto loops = bridgeOpenChains(squareInTwoHalves(0, 2.0), 1.0);
+
+    // Nothing bridged, so nothing for the caller to fill
+    EXPECT_EQ(loops.size(), 2);
+    EXPECT_EQ(countClosed(loops), 0);
+}
+
+TEST(SectionCapBridge, testTheNearestEndsAreBridgedFirst)
+{
+    // Arrange - two broken squares 3 apart. The far ends of one square are
+    // within reach of the other, but its own ends are nearer.
+    auto chains = squareInTwoHalves(0, 0.5);
+    const auto other = squareInTwoHalves(13, 0.5);
+    chains.insert(chains.end(), other.begin(), other.end());
+
+    // Act
+    const auto loops = bridgeOpenChains(chains, 5.0);
+
+    // Assert - each square closed on its own, never one loop wandering across both
+    ASSERT_EQ(loops.size(), 2);
+    EXPECT_EQ(countClosed(loops), 2);
+    EXPECT_NEAR(soupArea(fillLoops(loops, U, V)), 200.0, 1e-6);
+}
+
+TEST(SectionCapBridge, testClosedLoopsArePassedThroughUntouched)
+{
+    auto closed = square(20, 0, 10);
+    closed.push_back(closed.front());
+    auto chains = squareInTwoHalves(0, 0.5);
+    chains.push_back(closed);
+
+    const auto loops = bridgeOpenChains(chains, 1.0);
+
+    ASSERT_EQ(loops.size(), 2);
+    EXPECT_EQ(countClosed(loops), 2);
+    EXPECT_NE(std::ranges::find(loops, closed), loops.end());
+}
+
+TEST(SectionCapBridge, testTooManyOpenChainsAreLeftAlone)
+{
+    // Not a solid with a hole or two, so nothing is guessed
+    const auto chains = squareInTwoHalves(0, 0.5);
+
+    const auto loops = bridgeOpenChains(chains, 1.0, 1);
+
+    EXPECT_EQ(loops.size(), 2);
+    EXPECT_EQ(countClosed(loops), 0);
+}
+
+TEST(SectionCapBridge, testNothingIsBridgedWithoutAPositiveGap)
+{
+    const auto chains = squareInTwoHalves(0, 0.0);
+
+    EXPECT_EQ(countClosed(bridgeOpenChains(chains, 0.0)), 0);
+    EXPECT_EQ(countClosed(bridgeOpenChains(chains, std::numeric_limits<double>::quiet_NaN())), 0);
+}
+
+TEST(SectionCapBridge, testABoxMissingAWallStillGetsItsCap)
+{
+    // Arrange - the right wall of the box left out, as when OCCT fails to mesh
+    // one face of a solid
+    TriangleSoup soup = box(10.0);
+    soup.indices.erase(soup.indices.begin() + 18, soup.indices.begin() + 24);
+    const auto chained = chainLoops(sliceTriangles(soup, Z, 5.0));
+    ASSERT_EQ(countClosed(chained), 0);
+
+    // Act
+    const auto loops = bridgeOpenChains(chained, 10.0);
+
+    // Assert - the wall's chord stands in for the wall
+    ASSERT_EQ(countClosed(loops), 1);
+    EXPECT_NEAR(soupArea(fillLoops(loops, U, V)), 100.0, 1e-6);
+}
+
+TEST(SectionCapBridge, testEndsThatMeetButWereNotChainedAreJoined)
+{
+    // Coinciding ends the chaining did not join, as when two mesh edges carry
+    // different keys at the same point
+    const auto loops = bridgeOpenChains(squareInTwoHalves(0, 0.0), 1.0);
+
+    ASSERT_EQ(loops.size(), 1);
+    EXPECT_TRUE(isClosedExactly(loops[0]));
+    EXPECT_NEAR(soupArea(fillLoops(loops, U, V)), 100.0, 1e-6);
+}
+
+TEST(SectionCapBridge, testAClosedCycleAndAStrayChainComeOutSideBySide)
+{
+    // Arrange - a broken square that closes, and a lone chain far from it
+    auto chains = squareInTwoHalves(0, 0.5);
+    chains.push_back({Base::Vector3d(50, 0, 0), Base::Vector3d(60, 0, 0), Base::Vector3d(60, 10, 0)});
+
+    // Act
+    const auto loops = bridgeOpenChains(chains, 1.0);
+
+    // Assert - the square is closed, the stray chain is left open and whole
+    ASSERT_EQ(loops.size(), 2);
+    EXPECT_EQ(countClosed(loops), 1);
+    EXPECT_NE(std::ranges::find(loops, chains[2]), loops.end());
+}
+
+TEST(SectionCapBridge, testOnlyAShapeMadeWhollyOfSolidsCountsAsClosed)
+{
+    const TopoDS_Shape solid = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
+    const TopoDS_Shape face = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(20, 0, 0), gp_Dir(0, 0, 1)), 0, 5, 0, 5)
+                                  .Shape();
+    TopoDS_Compound mixed;
+    BRep_Builder builder;
+    builder.MakeCompound(mixed);
+    builder.Add(mixed, solid);
+    builder.Add(mixed, face);
+
+    EXPECT_TRUE(isClosedSolid(solid));
+    // The face's cut is open by design, so nothing may be bridged in it
+    EXPECT_FALSE(isClosedSolid(mixed));
+    EXPECT_FALSE(isClosedSolid(face));
+    EXPECT_FALSE(isClosedSolid(TopoDS_Shape()));
 }
 
 // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)

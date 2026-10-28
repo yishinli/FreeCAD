@@ -83,8 +83,14 @@ constexpr double meshAngularDeflection = 0.5;
 /// The shape's own triangulation is per face and unwelded, so a contour cut
 /// through it breaks at every face boundary. This rebuilds and merges, giving a
 /// closed manifold: every edge is shared by two triangles, so every cut closes.
-/// Pass deflection <= 0 to size it from the shape.
-PartExport TriangleSoup meshSolid(const TopoDS_Shape& shape, double deflection = 0.0);
+/// Pass deflection <= 0 to size it from the shape, and angularDeflection <= 0
+/// (radians) for meshAngularDeflection. Pass the viewer's own settings so the
+/// cap follows the drawn surface.
+PartExport TriangleSoup meshSolid(
+    const TopoDS_Shape& shape,
+    double deflection = 0.0,
+    double angularDeflection = meshAngularDeflection
+);
 
 /// Merge points that coincide to within `tolerance`, so triangles that touch
 /// also share vertex indices.
@@ -139,6 +145,29 @@ PartExport std::vector<Segment> sliceTriangles(
 
 /// Join segments end to end into loops, matching endpoints by mesh edge.
 PartExport std::vector<std::vector<Base::Vector3d>> chainLoops(const std::vector<Segment>& segments);
+
+/// Close the open chains among `loops` by bridging their ends with straight
+/// edges, nearest pair of ends first, never across more than `maxGap`.
+///
+/// Meant for the cut of a solid only. Its mesh should be watertight, but OCCT
+/// now and then leaves a face unmeshed or a seam unjoined, and the contour
+/// through that hole comes back as open chains - which cannot be filled, so the
+/// whole body shows no cap. Bridging the hole with the chord across it gives a
+/// cap that is wrong by no more than the hole is wide. The matching is greedy,
+/// not minimum-weight, which is enough for the few holes a mesh has. A chain
+/// that finds no partner within `maxGap` is returned open, as is everything when
+/// there are more than `maxChains` open chains, which is not a solid with a few
+/// holes. Closed loops are passed through untouched.
+PartExport std::vector<std::vector<Base::Vector3d>> bridgeOpenChains(
+    std::vector<std::vector<Base::Vector3d>> loops,
+    double maxGap,
+    std::size_t maxChains = 32
+);
+
+/// True if every face of `shape` belongs to a solid, so that every cut through
+/// it ought to close. A compound of a solid and a loose face is not: the cut of
+/// the face is open by design and must not be bridged.
+PartExport bool isClosedSolid(const TopoDS_Shape& shape);
 
 /// A solid cap covering the region enclosed by `loops`, as triangles.
 ///

@@ -86,6 +86,7 @@
 #include <Gui/ViewProvider.h>
 #include <Gui/ViewProviderGeometryObject.h>
 #include <Mod/Part/App/FeatureSectionAnalysis.h>
+#include <Mod/Part/App/Tools.h>
 
 #include "SectionCapHarvest.h"
 #include "SoBrepFaceSet.h"
@@ -274,6 +275,11 @@ bool ViewProviderSectionAnalysis::isDefaultShapeColor(const Base::Color& colour)
         && std::abs(colour.g - fallback.g) <= tolerance
         && std::abs(colour.b - fallback.b) <= tolerance;
 }
+
+// The widest hole in a solid's mesh that a cap is bridged across, as a fraction
+// of the body's diagonal. A face OCCT failed to mesh can span much of a small
+// part, so this is generous; the cap is still off by no more than the hole.
+constexpr double maxBridgeFraction = 0.25;
 
 // Fade-out steps for the hatching, from crisp to nearly gone: the transparency
 // of each level-of-detail step, paired with the on-screen pixels per hatch line
@@ -606,12 +612,25 @@ void ViewProviderSectionAnalysis::refreshHarvestCache()
             if (body == harvestCache.end()) {
                 return;
             }
-            auto watertight = Part::SectionCap::meshSolid(shape);
+            // Meshed as finely as the part is drawn, so the cap's edge follows
+            // the surface on screen and a coarser setting also costs less here.
+            double deflection = 0.0;
+            double angularDeflection = Part::SectionCap::meshAngularDeflection;
+            // A link draws with its target's settings.
+            auto* target = obj->getLinkedObject(true);
+            if (auto* vp = dynamic_cast<ViewProviderPartExt*>(
+                    Gui::Application::Instance->getViewProvider(target ? target : obj)
+                )) {
+                deflection = Part::Tools::getDeflection(shape, vp->Deviation.getValue());
+                angularDeflection = Base::toRadians(vp->AngularDeflection.getValue());
+            }
+            auto watertight = Part::SectionCap::meshSolid(shape, deflection, angularDeflection);
             if (watertight.indices.empty()) {
                 return;
             }
             body->bounds = Base::BoundBox3d(watertight.points.data(), watertight.points.size());
             body->soup = std::move(watertight);
+            body->closedSolid = Part::SectionCap::isClosedSolid(shape);
             remeshed[static_cast<std::size_t>(std::distance(harvestCache.begin(), body))] = true;
         }
     );
@@ -900,9 +919,19 @@ void ViewProviderSectionAnalysis::updateCapFromScene()
             continue;
         }
 
-        const auto loops = Part::SectionCap::chainLoops(segments);
+        auto loops = Part::SectionCap::chainLoops(segments);
         if (loops.empty()) {
             continue;
+        }
+        // A solid's mesh now and then has a hole - a face OCCT could not mesh,
+        // a seam left unjoined - and the cut through it comes out open, which
+        // would leave the whole body without a cap. Bridged across, the cap is
+        // off by no more than the hole is wide.
+        if (body.closedSolid) {
+            loops = Part::SectionCap::bridgeOpenChains(
+                std::move(loops),
+                maxBridgeFraction * body.bounds.CalcDiagonalLength()
+            );
         }
 
         // The cap surface itself. Without it the section is see-through and you
