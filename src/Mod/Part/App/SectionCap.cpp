@@ -37,9 +37,12 @@
 
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
+#include <OSD.hxx>
+#include <OSD_Parallel.hxx>
 #include <Precision.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_TShape.hxx>
 
 #include "BRepMesh.h"
 #include "TopoShape.h"
@@ -294,6 +297,97 @@ SectionCap::TriangleSoup SectionCap::meshSolid(
         soup.indices.push_back(static_cast<int>(facet.I3));
     }
     return soup;
+}
+
+
+std::vector<std::vector<std::size_t>> SectionCap::groupBySharedGeometry(
+    const std::vector<TopoDS_Shape>& shapes
+)
+{
+    // Union-find over the shapes, joined through the faces and edges they hold.
+    std::vector<std::size_t> root(shapes.size());
+    for (std::size_t i = 0; i < root.size(); ++i) {
+        root[i] = i;
+    }
+    auto find = [&root](std::size_t i) {
+        while (root[i] != i) {
+            root[i] = root[root[i]];
+            i = root[i];
+        }
+        return i;
+    };
+    std::unordered_map<const TopoDS_TShape*, std::size_t> owner;
+    for (std::size_t i = 0; i < shapes.size(); ++i) {
+        if (shapes[i].IsNull()) {
+            continue;
+        }
+        for (const TopAbs_ShapeEnum type : {TopAbs_FACE, TopAbs_EDGE}) {
+            for (TopExp_Explorer it(shapes[i], type); it.More(); it.Next()) {
+                const auto [found, inserted] = owner.emplace(it.Current().TShape().get(), i);
+                if (!inserted) {
+                    root[find(i)] = find(found->second);
+                }
+            }
+        }
+    }
+
+    std::unordered_map<std::size_t, std::size_t> groupOf;
+    std::vector<std::vector<std::size_t>> groups;
+    for (std::size_t i = 0; i < shapes.size(); ++i) {
+        const auto [found, inserted] = groupOf.emplace(find(i), groups.size());
+        if (inserted) {
+            groups.emplace_back();
+        }
+        groups[found->second].push_back(i);
+    }
+    return groups;
+}
+
+
+std::vector<SectionCap::TriangleSoup> SectionCap::meshSolids(const std::vector<MeshJob>& jobs)
+{
+    std::vector<TopoDS_Shape> shapes;
+    shapes.reserve(jobs.size());
+    for (const MeshJob& job : jobs) {
+        shapes.push_back(job.shape);
+    }
+    auto groups = groupBySharedGeometry(shapes);
+
+    // Largest first, by face count, so one big group - an array of one part -
+    // does not start last and leave every other core idle while it finishes.
+    std::vector<std::size_t> faces(shapes.size(), 0);
+    for (std::size_t i = 0; i < shapes.size(); ++i) {
+        for (TopExp_Explorer it(shapes[i], TopAbs_FACE); it.More(); it.Next()) {
+            ++faces[i];
+        }
+    }
+    auto cost = [&faces](const std::vector<std::size_t>& group) {
+        std::size_t sum = 0;
+        for (const std::size_t i : group) {
+            sum += faces[i];
+        }
+        return sum;
+    };
+    std::ranges::stable_sort(groups, std::ranges::greater {}, cost);
+
+    const OSD_SignalMode signalMode = OSD::SignalMode();
+    const bool floatingSignals = OSD::ToCatchFloatingSignals();
+    std::vector<TriangleSoup> soups(jobs.size());
+    OSD_Parallel::For(0, static_cast<int>(groups.size()), [&](int group) {
+        // Signal handling is per thread on Windows, and a TBB worker has none:
+        // without this an access violation in the mesher ends the process
+        // instead of reaching the catch below as a Standard_Failure.
+        OSD::SetThreadLocalSignal(signalMode, floatingSignals);
+        for (const std::size_t i : groups[static_cast<std::size_t>(group)]) {
+            try {
+                soups[i] = meshSolid(jobs[i].shape, jobs[i].deflection, jobs[i].angularDeflection);
+            }
+            catch (...) {
+                // Left empty: the body keeps the triangles it was drawn with.
+            }
+        }
+    });
+    return soups;
 }
 
 

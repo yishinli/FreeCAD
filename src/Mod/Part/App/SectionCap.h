@@ -27,9 +27,9 @@
 #include <Base/BoundBox.h>
 #include <Base/Vector3D.h>
 
-#include <Mod/Part/PartGlobal.h>
+#include <TopoDS_Shape.hxx>
 
-class TopoDS_Shape;
+#include <Mod/Part/PartGlobal.h>
 
 
 namespace Part
@@ -90,6 +90,32 @@ PartExport TriangleSoup meshSolid(
     const TopoDS_Shape& shape,
     double deflection = 0.0,
     double angularDeflection = meshAngularDeflection
+);
+
+/// One solid to mesh with meshSolid(), and the settings to mesh it with.
+struct MeshJob
+{
+    TopoDS_Shape shape;
+    double deflection = 0.0;
+    double angularDeflection = meshAngularDeflection;
+};
+
+/// meshSolid() for many solids at once, on all cores. Element i of the result
+/// is job i's soup, empty where the job failed.
+///
+/// Meshing (and the Clean() before it) writes the triangulation into the shape
+/// itself, so two jobs that share a face or an edge - copies, links, arrays -
+/// would race. Those are meshed one after the other on one thread; only
+/// unrelated jobs run side by side, so a large array of one part gains
+/// nothing. Faces that merely share a surface are fine: OCCT only reads
+/// geometry while meshing. The caller must keep everything else off the shapes
+/// until this returns.
+PartExport std::vector<TriangleSoup> meshSolids(const std::vector<MeshJob>& jobs);
+
+/// Sets of shapes that share a face or an edge, directly or through another
+/// shape in the same set, by index. Every index appears in exactly one set.
+PartExport std::vector<std::vector<std::size_t>> groupBySharedGeometry(
+    const std::vector<TopoDS_Shape>& shapes
 );
 
 /// Merge points that coincide to within `tolerance`, so triangles that touch

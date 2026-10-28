@@ -22,6 +22,11 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <gp_Pln.hxx>
 #include <TopoDS_Compound.hxx>
+#include <BRepAlgoAPI_BuilderAlgo.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
+#include <gp_Trsf.hxx>
 #include <BRepTools.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 
@@ -1342,6 +1347,103 @@ TEST(SectionCapBridge, testOnlyAShapeMadeWhollyOfSolidsCountsAsClosed)
     EXPECT_FALSE(isClosedSolid(mixed));
     EXPECT_FALSE(isClosedSolid(face));
     EXPECT_FALSE(isClosedSolid(TopoDS_Shape()));
+}
+
+TEST(SectionCapMeshMany, testCopiesOfOneSolidAreGroupedTogether)
+{
+    // Arrange - a link array shares the solid and only moves it
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
+    gp_Trsf shift;
+    shift.SetTranslation(gp_Vec(20, 0, 0));
+    const TopoDS_Shape moved = box.Moved(TopLoc_Location(shift));
+    const TopoDS_Shape other = BRepPrimAPI_MakeBox(5.0, 5.0, 5.0).Shape();
+
+    // Act
+    const auto groups = groupBySharedGeometry({box, other, moved, TopoDS_Shape()});
+
+    // Assert - the copies together, the unrelated box and the null shape alone
+    ASSERT_EQ(groups.size(), 3);
+    EXPECT_EQ(groups[0], (std::vector<std::size_t> {0, 2}));
+    EXPECT_EQ(groups[1], (std::vector<std::size_t> {1}));
+    EXPECT_EQ(groups[2], (std::vector<std::size_t> {3}));
+}
+
+namespace
+{
+
+/// The solids of a general fuse of `a` and `b`, which share whatever faces
+/// and edges the two touch along, as a boolean fragment leaves them.
+std::vector<TopoDS_Shape> fusedSolids(const TopoDS_Shape& a, const TopoDS_Shape& b)
+{
+    BRepAlgoAPI_BuilderAlgo fuse;
+    TopTools_ListOfShape arguments;
+    arguments.Append(a);
+    arguments.Append(b);
+    fuse.SetArguments(arguments);
+    fuse.Build();
+    std::vector<TopoDS_Shape> solids;
+    for (TopExp_Explorer it(fuse.Shape(), TopAbs_SOLID); it.More(); it.Next()) {
+        solids.push_back(it.Current());
+    }
+    return solids;
+}
+
+}  // namespace
+
+TEST(SectionCapMeshMany, testSolidsSharingAFaceAreGroupedTogether)
+{
+    const auto solids = fusedSolids(
+        BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape(),
+        BRepPrimAPI_MakeBox(gp_Pnt(10, 0, 0), 10.0, 10.0, 10.0).Shape()
+    );
+    ASSERT_EQ(solids.size(), 2);
+
+    EXPECT_EQ(groupBySharedGeometry(solids).size(), 1);
+}
+
+TEST(SectionCapMeshMany, testSolidsSharingOnlyAnEdgeAreGroupedTogether)
+{
+    // Touching along the edge x = y = 10 and nowhere else
+    const auto solids = fusedSolids(
+        BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape(),
+        BRepPrimAPI_MakeBox(gp_Pnt(10, 10, 0), 10.0, 10.0, 10.0).Shape()
+    );
+    ASSERT_EQ(solids.size(), 2);
+
+    EXPECT_EQ(groupBySharedGeometry(solids).size(), 1);
+}
+
+TEST(SectionCapMeshMany, testMeshingTogetherGivesWhatMeshingOneByOneGives)
+{
+    // Arrange - unrelated solids, which run side by side, and a moved copy,
+    // which must wait for its original
+    std::vector<MeshJob> jobs;
+    for (int i = 0; i < 12; ++i) {
+        gp_Ax2 axis(gp_Pnt(30.0 * i, 0, 0), gp_Dir(0, 0, 1));
+        jobs.push_back({BRepPrimAPI_MakeCylinder(axis, 5.0 + i, 20.0).Shape(), 0.0, meshAngularDeflection});
+    }
+    gp_Trsf shift;
+    shift.SetTranslation(gp_Vec(0, 50, 0));
+    jobs.push_back({jobs[3].shape.Moved(TopLoc_Location(shift)), 0.0, meshAngularDeflection});
+
+    // Act
+    const auto together = meshSolids(jobs);
+
+    // Assert - same triangles as on their own, and every one watertight
+    ASSERT_EQ(together.size(), jobs.size());
+    for (std::size_t i = 0; i < jobs.size(); ++i) {
+        const auto alone = meshSolid(jobs[i].shape, jobs[i].deflection, jobs[i].angularDeflection);
+        EXPECT_EQ(together[i].indices.size(), alone.indices.size()) << "job " << i;
+        // Same place too, or job i got another job's mesh
+        EXPECT_EQ(boundsOf(together[i]).GetCenter(), boundsOf(alone).GetCenter()) << "job " << i;
+        EXPECT_EQ(boundaryEdgeCount(together[i]), 0) << "job " << i;
+    }
+    EXPECT_NEAR(boundsOf(together.back()).MinY - boundsOf(together[3]).MinY, 50.0, 1e-6);
+}
+
+TEST(SectionCapMeshMany, testAnEmptyJobListMeshesNothing)
+{
+    EXPECT_TRUE(meshSolids({}).empty());
 }
 
 // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)

@@ -598,11 +598,18 @@ void ViewProviderSectionAnalysis::refreshHarvestCache()
     // along shared edges, so a contour cut through them breaks wherever the
     // plane crosses a face boundary. Anything with a solid behind it is remeshed
     // watertight instead.
-    std::vector<bool> remeshed(harvestCache.size(), false);
+    //
+    // The jobs are gathered here, on the GUI thread that may ask the document
+    // and the view providers, and meshed on all cores together: meshing is
+    // nearly all of the time this takes. The GUI thread waits for it, so
+    // nothing else touches the shapes while they are being meshed.
+    std::vector<Part::SectionCap::MeshJob> jobs;
+    std::vector<std::size_t> jobBody;
+    std::vector<bool> jobClosed;
     Part::SectionAnalysis::forEachSourcePart(
         sources,
         feat,
-        [this, &remeshed](App::DocumentObject* obj, const TopoDS_Shape& shape) {
+        [this, &jobs, &jobBody, &jobClosed](App::DocumentObject* obj, const TopoDS_Shape& shape) {
             if (shape.IsNull() || TopExp_Explorer(shape, TopAbs_SOLID).More() == Standard_False) {
                 return;
             }
@@ -614,26 +621,34 @@ void ViewProviderSectionAnalysis::refreshHarvestCache()
             }
             // Meshed as finely as the part is drawn, so the cap's edge follows
             // the surface on screen and a coarser setting also costs less here.
-            double deflection = 0.0;
-            double angularDeflection = Part::SectionCap::meshAngularDeflection;
+            Part::SectionCap::MeshJob job;
+            job.shape = shape;
             // A link draws with its target's settings.
             auto* target = obj->getLinkedObject(true);
             if (auto* vp = dynamic_cast<ViewProviderPartExt*>(
                     Gui::Application::Instance->getViewProvider(target ? target : obj)
                 )) {
-                deflection = Part::Tools::getDeflection(shape, vp->Deviation.getValue());
-                angularDeflection = Base::toRadians(vp->AngularDeflection.getValue());
+                job.deflection = Part::Tools::getDeflection(shape, vp->Deviation.getValue());
+                job.angularDeflection = Base::toRadians(vp->AngularDeflection.getValue());
             }
-            auto watertight = Part::SectionCap::meshSolid(shape, deflection, angularDeflection);
-            if (watertight.indices.empty()) {
-                return;
-            }
-            body->bounds = Base::BoundBox3d(watertight.points.data(), watertight.points.size());
-            body->soup = std::move(watertight);
-            body->closedSolid = Part::SectionCap::isClosedSolid(shape);
-            remeshed[static_cast<std::size_t>(std::distance(harvestCache.begin(), body))] = true;
+            jobs.push_back(std::move(job));
+            jobBody.push_back(static_cast<std::size_t>(std::distance(harvestCache.begin(), body)));
+            jobClosed.push_back(Part::SectionCap::isClosedSolid(shape));
         }
     );
+
+    auto watertight = Part::SectionCap::meshSolids(jobs);
+    std::vector<bool> remeshed(harvestCache.size(), false);
+    for (std::size_t i = 0; i < watertight.size(); ++i) {
+        if (watertight[i].indices.empty()) {
+            continue;
+        }
+        HarvestedBody& body = harvestCache[jobBody[i]];
+        body.bounds = Base::BoundBox3d(watertight[i].points.data(), watertight[i].points.size());
+        body.soup = std::move(watertight[i]);
+        body.closedSolid = jobClosed[i];
+        remeshed[jobBody[i]] = true;
+    }
 
     // The rest - meshes, point clouds, loose faces - have no solid to remesh
     // from, so their triangles stay as the scene graph gave them: three fresh
