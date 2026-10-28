@@ -3,6 +3,13 @@
 #include <gtest/gtest.h>
 #include <App/ApplicationDirectories.h>
 
+#include <QByteArray>
+#include <QString>
+#include <QtGlobal>
+
+#include <array>
+#include <utility>
+
 #include <random>
 #include <fstream>
 #include "Base/Exception.h"
@@ -63,6 +70,11 @@ public:
     static std::filesystem::path wrapSanitizePath(const std::string& pathAsString)
     {
         return sanitizePath(pathAsString);
+    }
+
+    static std::tuple<fs::path, fs::path, fs::path> wrapGetCustomPaths()
+    {
+        return getCustomPaths();
     }
 };
 
@@ -955,6 +967,159 @@ TEST_F(ApplicationDirectoriesTest, appendCreateAlreadyVersionedBails)
     auto before = sub;
     appDirs->wrapAppendVersionIfPossibleCreate(base, sub);
     EXPECT_EQ(sub, before);
+}
+
+namespace
+{
+
+/// Sets the FREECAD_USER_* variables for one test, and restores what was there after it.
+class ScopedUserVariables
+{
+public:
+    ScopedUserVariables(const QString& home, const QString& data = {}, const QString& temp = {})
+    {
+        const QString values[] = {home, data, temp};
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            saved[i] = {qEnvironmentVariableIsSet(names[i]), qgetenv(names[i])};
+            set(names[i], values[i]);
+        }
+    }
+    ~ScopedUserVariables()
+    {
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (saved[i].first) {
+                qputenv(names[i], saved[i].second);
+            }
+            else {
+                qunsetenv(names[i]);
+            }
+        }
+    }
+    ScopedUserVariables(const ScopedUserVariables&) = delete;
+    ScopedUserVariables& operator=(const ScopedUserVariables&) = delete;
+
+private:
+    static constexpr std::array<const char*, 3> names {
+        "FREECAD_USER_HOME",
+        "FREECAD_USER_DATA",
+        "FREECAD_USER_TEMP"
+    };
+    std::array<std::pair<bool, QByteArray>, 3> saved;
+
+    static void set(const char* name, const QString& value)
+    {
+        if (value.isEmpty()) {
+            qunsetenv(name);
+        }
+        else {
+            qputenv(name, value.toLocal8Bit());
+        }
+    }
+};
+
+QString toQString(const fs::path& path)
+{
+#if defined(_WIN32)
+    return QString::fromStdWString(path.wstring());
+#else
+    return QString::fromStdString(path.string());
+#endif
+}
+
+}  // namespace
+
+// FREECAD_USER_HOME naming a directory that exists -> used, with data and temp inside it
+TEST_F(ApplicationDirectoriesTest, customHomeThatExistsIsUsed)
+{
+    const fs::path home = tempDir() / "home";
+    fs::create_directories(home);
+    ScopedUserVariables variables(toQString(home));
+
+    auto [userHome, userData, userTemp] = ApplicationDirectoriesTestClass::wrapGetCustomPaths();
+
+    ASSERT_FALSE(userHome.empty());
+    ASSERT_FALSE(userData.empty());
+    ASSERT_FALSE(userTemp.empty());
+    EXPECT_TRUE(fs::equivalent(userHome, home));
+    EXPECT_TRUE(fs::equivalent(userData, home));
+    EXPECT_TRUE(fs::equivalent(userTemp, home / "temp"));
+}
+
+// FREECAD_USER_HOME naming a directory that does not exist yet -> created and used,
+// rather than silently falling back to the standard location
+TEST_F(ApplicationDirectoriesTest, customHomeThatDoesNotExistIsCreated)
+{
+    const fs::path home = tempDir() / "not" / "there" / "yet";
+    ScopedUserVariables variables(toQString(home));
+
+    auto [userHome, userData, userTemp] = ApplicationDirectoriesTestClass::wrapGetCustomPaths();
+
+    ASSERT_TRUE(fs::is_directory(home));
+    ASSERT_FALSE(userHome.empty());
+    ASSERT_FALSE(userData.empty());
+    EXPECT_TRUE(fs::equivalent(userHome, home));
+    EXPECT_TRUE(fs::equivalent(userData, home));
+    EXPECT_TRUE(fs::is_directory(userTemp));
+}
+
+// FREECAD_USER_DATA and FREECAD_USER_TEMP that do not exist yet -> created too
+TEST_F(ApplicationDirectoriesTest, customDataAndTempThatDoNotExistAreCreated)
+{
+    const fs::path data = tempDir() / "data";
+    const fs::path temp = tempDir() / "temp";
+    ScopedUserVariables variables({}, toQString(data), toQString(temp));
+
+    auto [userHome, userData, userTemp] = ApplicationDirectoriesTestClass::wrapGetCustomPaths();
+
+    EXPECT_TRUE(userHome.empty());
+    ASSERT_FALSE(userData.empty());
+    ASSERT_FALSE(userTemp.empty());
+    EXPECT_TRUE(fs::equivalent(userData, data));
+    EXPECT_TRUE(fs::equivalent(userTemp, temp));
+}
+
+// FREECAD_USER_HOME that exists and FREECAD_USER_DATA that does not -> both used, data created
+TEST_F(ApplicationDirectoriesTest, customHomeWithMissingDataUsesBoth)
+{
+    const fs::path home = tempDir() / "home";
+    const fs::path data = tempDir() / "data";
+    fs::create_directories(home);
+    ScopedUserVariables variables(toQString(home), toQString(data));
+
+    auto [userHome, userData, userTemp] = ApplicationDirectoriesTestClass::wrapGetCustomPaths();
+
+    ASSERT_FALSE(userHome.empty());
+    ASSERT_FALSE(userData.empty());
+    ASSERT_FALSE(userTemp.empty());
+    EXPECT_TRUE(fs::equivalent(userHome, home));
+    EXPECT_TRUE(fs::equivalent(userData, data));
+    EXPECT_TRUE(fs::equivalent(userTemp, home / "temp"));
+}
+
+// FREECAD_USER_HOME naming something that cannot be a directory -> ignored, as before
+TEST_F(ApplicationDirectoriesTest, customHomeThatCannotBeCreatedIsIgnored)
+{
+    const fs::path file = tempDir() / "a_file";
+    std::ofstream(file) << "not a directory";
+    ScopedUserVariables variables(toQString(file / "home"));
+
+    auto [userHome, userData, userTemp] = ApplicationDirectoriesTestClass::wrapGetCustomPaths();
+
+    EXPECT_TRUE(userHome.empty());
+    EXPECT_TRUE(userData.empty());
+    EXPECT_TRUE(userTemp.empty());
+}
+
+// No variables set -> no custom paths
+TEST_F(ApplicationDirectoriesTest, noCustomVariablesGiveNoCustomPaths)
+{
+    ScopedUserVariables variables({});
+
+    auto [userHome, userData, userTemp] = ApplicationDirectoriesTestClass::wrapGetCustomPaths();
+
+    EXPECT_TRUE(userHome.empty());
+    EXPECT_TRUE(userData.empty());
+    EXPECT_TRUE(userTemp.empty());
 }
 
 /* NOLINTEND(
