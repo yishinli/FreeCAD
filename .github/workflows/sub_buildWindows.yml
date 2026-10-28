@@ -75,7 +75,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-    continue-on-error: ${{ inputs.allowedToFail }}
+    continue-on-error: ${{ inputs.allowedToFail == true }}
     env:
       CCACHE_COMPILERCHECK: "%compiler%" # default:mtime
       CCACHE_COMPRESS: true
