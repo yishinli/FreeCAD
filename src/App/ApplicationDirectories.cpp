@@ -434,21 +434,28 @@ std::tuple<fs::path, fs::path, fs::path> ApplicationDirectories::getCustomPaths(
     QString userData = env.value(QStringLiteral("FREECAD_USER_DATA"));
     QString userTemp = env.value(QStringLiteral("FREECAD_USER_TEMP"));
 
-    auto toNativePath = [](QString& path) {
-        if (!path.isEmpty()) {
-            if (const QDir dir(path); dir.exists()) {
-                path = QDir::toNativeSeparators(dir.canonicalPath());
-            }
-            else {
-                path.clear();
-            }
+    // Create a missing directory rather than ignore it: falling back would silently
+    // use the standard location the variable was set to avoid.
+    auto toNativePath = [](QString& path, const char* variable) {
+        if (path.isEmpty()) {
+            return;
         }
+        if (!QDir().mkpath(path)) {
+            Base::Console().warning(
+                "{} is set to '{}', which is not a directory and could not be created. Ignoring it.\n",
+                variable,
+                path.toStdString()
+            );
+            path.clear();
+            return;
+        }
+        path = QDir::toNativeSeparators(QDir(path).canonicalPath());
     };
 
     // verify env. variables
-    toNativePath(userHome);
-    toNativePath(userData);
-    toNativePath(userTemp);
+    toNativePath(userHome, "FREECAD_USER_HOME");
+    toNativePath(userData, "FREECAD_USER_DATA");
+    toNativePath(userTemp, "FREECAD_USER_TEMP");
 
     // if FREECAD_USER_HOME is set but not FREECAD_USER_DATA
     if (!userHome.isEmpty() && userData.isEmpty()) {
