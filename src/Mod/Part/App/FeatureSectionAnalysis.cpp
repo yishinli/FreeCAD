@@ -803,7 +803,7 @@ App::DocumentObjectExecReturn* SectionAnalysis::execute()
 
     if (faces.empty() && solidCount > 0) {
         Base::Console().warning(
-            "SectionAnalysis: %d solids found but no cross-section faces generated. "
+            "SectionAnalysis: {} solids found but no cross-section faces generated. "
             "The cutting plane may not intersect the geometry.\n",
             solidCount
         );
