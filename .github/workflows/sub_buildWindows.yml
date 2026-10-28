@@ -24,6 +24,10 @@
 
 name: Build Windows
 on:
+  # Local test build only (not for upstream): the fork has no registered workflows, so build on push.
+  push:
+    branches:
+      - test/section-both
   workflow_dispatch:
     inputs:
       artifactBasename:
@@ -219,7 +223,7 @@ jobs:
         if: "!inputs.skipBuild"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ inputs.artifactBasename }}-Windows
+          name: ${{ inputs.artifactBasename || 'FreeCAD-section' }}-Windows
           path: C:/FC/FreeCAD-windows.7z
           compression-level: 0
           retention-days: 14
