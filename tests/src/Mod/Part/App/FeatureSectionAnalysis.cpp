@@ -1154,7 +1154,7 @@ TEST_F(FeatureSectionAnalysisTest, testDisplayModeSurvivesSaveAndReload)
 
     tests::TempDirectory dir;
     App::Document* reopened = nullptr;
-    Part::SectionAnalysis* restored = saveAndReopen(dir.path(), reopened);
+    Part::SectionAnalysis* restored = saveAndReopen(dir.path().string(), reopened);
     ASSERT_NE(restored, nullptr);
 
     // Reopening in Geometry mode would silently cost a minute on the documents
