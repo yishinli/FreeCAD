@@ -65,6 +65,7 @@
 
 #include "FaceMakerBullseye.h"
 #include "FeatureSectionAnalysis.h"
+#include "WireJoiner.h"
 
 
 using namespace Part;
