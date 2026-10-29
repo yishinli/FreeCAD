@@ -5,13 +5,26 @@
 #include <Bnd_Box.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <TColgp_Array1OfPnt.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
+#include <gp_Trsf.hxx>
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <limits>
+#include <numbers>
 
 #include <App/GeoFeatureGroupExtension.h>
 #include <App/DocumentObjectGroup.h>
@@ -1577,5 +1590,168 @@ INSTANTIATE_TEST_SUITE_P(
         return std::string(info.param.document);
     }
 );
+
+// planeOfElement: the plane a face or edge picked in the 3D view stands for
+
+namespace
+{
+constexpr double planeTolerance = 1e-9;
+
+void expectPlane(
+    const std::optional<Part::SectionAnalysis::ElementPlane>& plane,
+    const Base::Vector3d& normal,
+    double offset,
+    bool outward
+)
+{
+    ASSERT_TRUE(plane.has_value());
+    EXPECT_NEAR((plane->normal - normal).Length(), 0.0, planeTolerance);
+    EXPECT_NEAR(plane->offset, offset, planeTolerance);
+    EXPECT_EQ(plane->outward, outward);
+}
+}  // namespace
+
+// A flat face of a solid -> the plane it lies in, normal out of the material
+TEST(SectionAnalysisPlaneOfElement, testTheTopFaceOfABoxPointsUp)
+{
+    BRepPrimAPI_MakeBox box(gp_Pnt(0, 0, 1), 2, 3, 4);
+    box.Build();
+    expectPlane(Part::SectionAnalysis::planeOfElement(box.TopFace()), Base::Vector3d(0, 0, 1), 5.0, true);
+}
+
+TEST(SectionAnalysisPlaneOfElement, testTheBottomFaceOfABoxPointsDown)
+{
+    BRepPrimAPI_MakeBox box(gp_Pnt(0, 0, 1), 2, 3, 4);
+    box.Build();
+    expectPlane(Part::SectionAnalysis::planeOfElement(box.BottomFace()), Base::Vector3d(0, 0, -1), -1.0, true);
+}
+
+// The face's orientation, not its surface's, says which side is out
+TEST(SectionAnalysisPlaneOfElement, testAReversedFacePointsTheOtherWay)
+{
+    BRepPrimAPI_MakeBox box(gp_Pnt(0, 0, 1), 2, 3, 4);
+    box.Build();
+    const TopoDS_Shape reversed = box.TopFace().Reversed();
+    expectPlane(Part::SectionAnalysis::planeOfElement(reversed), Base::Vector3d(0, 0, -1), -5.0, true);
+}
+
+// The element's placement is part of where it is
+TEST(SectionAnalysisPlaneOfElement, testAMovedFaceCarriesItsPlacement)
+{
+    BRepPrimAPI_MakeBox box(gp_Pnt(0, 0, 1), 2, 3, 4);
+    box.Build();
+    gp_Trsf turn;
+    turn.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)), std::numbers::pi / 2.0);  // z -> -y
+    const TopoDS_Shape moved = box.TopFace().Moved(TopLoc_Location(turn));
+    expectPlane(Part::SectionAnalysis::planeOfElement(moved), Base::Vector3d(0, -1, 0), 5.0, true);
+}
+
+// A circular edge -> the plane of the circle, either way round
+TEST(SectionAnalysisPlaneOfElement, testACircleGivesItsOwnPlane)
+{
+    const gp_Dir axis(0, 1, 1);
+    const TopoDS_Edge circle = BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp_Pnt(1, 2, 3), axis), 4.0));
+    const auto plane = Part::SectionAnalysis::planeOfElement(circle);
+    ASSERT_TRUE(plane.has_value());
+    EXPECT_FALSE(plane->outward);
+    const Base::Vector3d expected = Base::Vector3d(0, 1, 1).Normalize();
+    EXPECT_NEAR(std::abs(plane->normal * expected), 1.0, planeTolerance);
+    // Through the circle's centre, whichever way the normal came out
+    EXPECT_NEAR(plane->offset, plane->normal * Base::Vector3d(1, 2, 3), 1e-7);
+}
+
+// A straight edge -> the plane square to it, through the pick projected onto it
+TEST(SectionAnalysisPlaneOfElement, testAStraightEdgeIsCutSquareAtThePick)
+{
+    const TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(gp_Pnt(0, 1, 2), gp_Pnt(10, 1, 2));
+    expectPlane(
+        Part::SectionAnalysis::planeOfElement(edge, Base::Vector3d(3, 1.01, 1.99)),
+        Base::Vector3d(1, 0, 0),
+        3.0,
+        false
+    );
+}
+
+TEST(SectionAnalysisPlaneOfElement, testAStraightEdgeWithoutAPickIsCutInTheMiddle)
+{
+    const TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(gp_Pnt(0, 1, 2), gp_Pnt(10, 1, 2));
+    expectPlane(Part::SectionAnalysis::planeOfElement(edge), Base::Vector3d(1, 0, 0), 5.0, false);
+}
+
+// A mirror turns the solid inside out in its placement; the outside must survive it
+TEST(SectionAnalysisPlaneOfElement, testAMirroredSolidStillPointsOut)
+{
+    BRepPrimAPI_MakeBox box(gp_Pnt(0, 0, 1), 2, 3, 4);
+    box.Build();
+    gp_Trsf mirror;
+    mirror.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)));  // z -> -z
+    const TopoDS_Shape mirrored = BRepBuilderAPI_Transform(box.Shape(), mirror, true).Shape();
+    // The old top face (z = 5) is now the bottom one, at z = -5, facing down
+    std::optional<Part::SectionAnalysis::ElementPlane> lowest;
+    for (TopExp_Explorer xp(mirrored, TopAbs_FACE); xp.More(); xp.Next()) {
+        auto plane = Part::SectionAnalysis::planeOfElement(xp.Current());
+        ASSERT_TRUE(plane.has_value());
+        if (std::abs(plane->normal.z) > 0.5 && (!lowest || plane->offset * plane->normal.z < lowest->offset * lowest->normal.z)) {
+            lowest = plane;
+        }
+    }
+    expectPlane(lowest, Base::Vector3d(0, 0, -1), 5.0, true);
+}
+
+// The middle of the face's parameter range need not be on the face: a plane's
+// normal is the same everywhere, so a face with a hole in the middle still works
+TEST(SectionAnalysisPlaneOfElement, testAFaceWithAHoleInTheMiddleStillWorks)
+{
+    BRepPrimAPI_MakeBox outer(gp_Pnt(0, 0, 0), 10, 10, 2);
+    BRepPrimAPI_MakeBox inner(gp_Pnt(2, 2, -1), 6, 6, 4);
+    const TopoDS_Shape frame = BRepAlgoAPI_Cut(outer.Shape(), inner.Shape()).Shape();
+    bool foundTop = false;
+    for (TopExp_Explorer xp(frame, TopAbs_FACE); xp.More(); xp.Next()) {
+        auto plane = Part::SectionAnalysis::planeOfElement(xp.Current());
+        ASSERT_TRUE(plane.has_value());
+        if (plane->normal.z > 0.5) {
+            expectPlane(plane, Base::Vector3d(0, 0, 1), 2.0, true);
+            foundTop = true;
+        }
+    }
+    EXPECT_TRUE(foundTop);
+}
+
+// Part of a circle is as flat as all of it
+TEST(SectionAnalysisPlaneOfElement, testAnArcGivesItsCirclesPlane)
+{
+    const gp_Circ circle(gp_Ax2(gp_Pnt(0, 0, 3), gp_Dir(0, 0, 1)), 4.0);
+    const TopoDS_Edge arc = BRepBuilderAPI_MakeEdge(circle, 0.0, std::numbers::pi / 3.0);
+    const auto plane = Part::SectionAnalysis::planeOfElement(arc);
+    ASSERT_TRUE(plane.has_value());
+    EXPECT_FALSE(plane->outward);
+    EXPECT_NEAR(std::abs(plane->normal.z), 1.0, planeTolerance);
+    EXPECT_NEAR(plane->offset * plane->normal.z, 3.0, 1e-7);
+}
+
+// Elements that stand for no one plane
+TEST(SectionAnalysisPlaneOfElement, testACurvedFaceGivesNoPlane)
+{
+    BRepPrimAPI_MakeCylinder cylinder(2.0, 5.0);
+    cylinder.Build();
+    EXPECT_FALSE(Part::SectionAnalysis::planeOfElement(cylinder.Face()).has_value());
+}
+
+TEST(SectionAnalysisPlaneOfElement, testACurveThatIsNotFlatGivesNoPlane)
+{
+    TColgp_Array1OfPnt poles(1, 4);
+    poles(1) = gp_Pnt(0, 0, 0);
+    poles(2) = gp_Pnt(1, 0, 0);
+    poles(3) = gp_Pnt(1, 1, 0);
+    poles(4) = gp_Pnt(1, 1, 1);
+    const TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(Handle(Geom_BezierCurve)(new Geom_BezierCurve(poles)));
+    EXPECT_FALSE(Part::SectionAnalysis::planeOfElement(edge).has_value());
+}
+
+TEST(SectionAnalysisPlaneOfElement, testAVertexOrNothingGivesNoPlane)
+{
+    EXPECT_FALSE(Part::SectionAnalysis::planeOfElement(BRepBuilderAPI_MakeVertex(gp_Pnt(1, 2, 3))).has_value());
+    EXPECT_FALSE(Part::SectionAnalysis::planeOfElement(TopoDS_Shape()).has_value());
+}
 
 // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)

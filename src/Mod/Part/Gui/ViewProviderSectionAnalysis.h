@@ -40,6 +40,7 @@ class SoDrawStyle;
 class SoFaceSet;
 class SoIndexedLineSet;
 class SoMaterial;
+class SoPickStyle;
 class SoSeparator;
 class SoShapeHints;
 class SoSwitch;
@@ -131,6 +132,13 @@ public:
     /// Hatch lines spacings across the model.
     static constexpr double hatchLinesAcrossModel = 120.0;
 
+    /// How far into the kept material the clip planes sit, in mm, so the
+    /// body's surface does not z-fight the cap. Not an OCCT tolerance: those
+    /// are for doubles, and Coin holds vertices as float, so Precision::Confusion
+    /// would round away to nothing. A face this close to the plane on the kept
+    /// side is clipped too.
+    static constexpr double clipInset = 0.01;
+
     /// The spacing to hatch at: the property, or one derived from the model when
     /// the property is left at zero. Zero rather than a number so a section made
     /// from Python follows the model too, not only one made by the command.
@@ -168,6 +176,10 @@ public:
     void setHatching(bool on);
     void setPerSolidColors(bool on);
     void setShowPlane(bool on);
+
+    /// Let clicks in the 3D view pass through the section - its caps, outlines
+    /// and handles - to what lies behind, or stop them on it again.
+    void setPickable(bool on);
 
     /// The properties are the only state these two have; reading them back
     /// beats a cached copy that has to be kept in step.
@@ -260,6 +272,8 @@ private:
     /// Recompute the section when visibility of an object under Source changes
     void slotChangedObject(const App::DocumentObject& obj, const App::Property& prop);
 
+    /// First child of pcRoot, so it governs everything the section draws.
+    SoPickStyle* pickLock = nullptr;
     SoSwitch* planeSwitch = nullptr;
     SoSeparator* cuttingPlane = nullptr;
     SoShapeHints* planeHints = nullptr;

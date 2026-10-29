@@ -27,12 +27,16 @@
 
 #include <Base/Vector3D.h>
 
+#include <Gui/Selection/Selection.h>
 #include <Gui/TaskView/TaskView.h>
 #include <Gui/TaskView/TaskDialog.h>
+
+#include <Mod/Part/App/FeatureSectionAnalysis.h>
 
 class QComboBox;
 class QCheckBox;
 class QLabel;
+class QPushButton;
 
 namespace Gui
 {
@@ -40,17 +44,12 @@ class QuantitySpinBox;
 class ColorButton;
 }  // namespace Gui
 
-namespace Part
-{
-class SectionAnalysis;
-}
-
 namespace PartGui
 {
 
 class ViewProviderSectionAnalysis;
 
-class SectionAnalysisWidget: public QWidget
+class SectionAnalysisWidget: public QWidget, public Gui::SelectionObserver
 {
     Q_OBJECT
 
@@ -108,6 +107,40 @@ private:
     /// other than the boxes moved it - the dragger, or a script.
     void refreshFromFeature();
 
+    /// Put the plane on the face or edge picked in the 3D view, if it stands for one.
+    void onSelectionChanged(const Gui::SelectionChanges& msg) override;
+
+    /// Start or stop waiting for the face or edge the plane is to align to.
+    void onAlignToggled(bool on);
+
+    /// Stop waiting for a pick: detach, and drop the gate if it is still ours.
+    void disarmAlign();
+
+    /// Lets through only what the plane can align to, while waiting for a pick.
+    class AlignGate: public Gui::SelectionGate
+    {
+    public:
+        explicit AlignGate(const SectionAnalysisWidget* widget)
+            : panel(widget)
+        {}
+        bool allow(App::Document* doc, App::DocumentObject* obj, const char* subname) override;
+
+    private:
+        const SectionAnalysisWidget* panel;
+    };
+    /// The gate installed while waiting, to recognise it when removing it.
+    const Gui::SelectionGate* alignGate = nullptr;
+
+    /// The plane a selected element stands for, oriented for the cut.
+    std::optional<Part::SectionAnalysis::ElementPlane> planeOfSelection(
+        const App::DocumentObject* obj,
+        const char* subname,
+        const std::optional<Base::Vector3d>& picked
+    ) const;
+
+    /// Make `plane` the cutting plane, as no preset and without tilt.
+    void alignTo(const Part::SectionAnalysis::ElementPlane& plane);
+
     void onPresetChanged(int index);
     void onAngle1Changed(double val);
     void onAngle2Changed(double val);
@@ -155,6 +188,9 @@ private:
     Gui::QuantitySpinBox* offsetSpin = nullptr;
     Gui::QuantitySpinBox* angle1Spin = nullptr;
     Gui::QuantitySpinBox* angle2Spin = nullptr;
+
+    QPushButton* alignButton = nullptr;
+    QLabel* alignHint = nullptr;
 
     QCheckBox* flipCheck = nullptr;
     Gui::ColorButton* sectionColorBtn = nullptr;

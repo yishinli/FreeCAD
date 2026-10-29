@@ -22,6 +22,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -101,6 +102,23 @@ public:
         const Base::Vector3d& normal,
         double offset,
         const Base::Vector3d& hint
+    );
+
+    /// The plane a picked face or edge stands for: the plane a flat face lies
+    /// in, the plane of a flat curved edge (a circle, an arc), or the plane
+    /// square to a straight edge, through `picked` if given and else through
+    /// its middle. All in the element's own placement, so pass it transformed.
+    struct ElementPlane
+    {
+        Base::Vector3d normal;  //!< unit length
+        double offset = 0.0;    //!< along `normal`, as in PlaneOffset
+        /// True when `normal` points out of the material: a face knows which
+        /// side its solid is on. An edge does not, so its normal is either way.
+        bool outward = false;
+    };
+    static std::optional<ElementPlane> planeOfElement(
+        const TopoDS_Shape& element,
+        const std::optional<Base::Vector3d>& picked = std::nullopt
     );
 
     /// Does a change to this section's own `prop` mean the triangles harvested

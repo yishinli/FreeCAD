@@ -19,8 +19,10 @@
  *                                                                            *
  ******************************************************************************/
 
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepGProp_Face.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -36,6 +38,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Geom2d_Curve.hxx>
+#include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Vec.hxx>
 #include <ShapeAnalysis_FreeBounds.hxx>
@@ -261,6 +264,83 @@ Base::Vector3d SectionAnalysis::draggerAnchor(
     // happens to pass closest to (0, 0, 0), and an imported assembly can sit
     // far enough away for that to be off screen entirely.
     return hint - normal * (hint * normal - offset);
+}
+
+std::optional<SectionAnalysis::ElementPlane> SectionAnalysis::planeOfElement(
+    const TopoDS_Shape& element,
+    const std::optional<Base::Vector3d>& picked
+)
+{
+    if (element.IsNull()) {
+        return std::nullopt;
+    }
+    const auto toVector = [](const gp_XYZ& xyz) {
+        return Base::Vector3d(xyz.X(), xyz.Y(), xyz.Z());
+    };
+    const auto onPlane = [&](const gp_Pln& plane, bool outward) {
+        const Base::Vector3d normal = toVector(plane.Axis().Direction().XYZ());
+        return ElementPlane {normal, normal * toVector(plane.Location().XYZ()), outward};
+    };
+
+    try {
+        if (element.ShapeType() == TopAbs_FACE) {
+            const TopoDS_Face& face = TopoDS::Face(element);
+            gp_Pln plane;
+            if (BRepAdaptor_Surface surface(face); surface.GetType() == GeomAbs_Plane) {
+                plane = surface.Plane();
+            }
+            else if (!TopoShape(face).isPlanarFace() || !TopoShape(face).findPlane(plane)) {
+                return std::nullopt;
+            }
+            // The surface's own normal ignores which way round the face is used;
+            // the face's normal does not, and on a solid that is the outside.
+            BRepGProp_Face props(face);
+            double u1 = 0.0;
+            double u2 = 0.0;
+            double v1 = 0.0;
+            double v2 = 0.0;
+            props.Bounds(u1, u2, v1, v2);
+            gp_Pnt point;
+            gp_Vec faceNormal;
+            props.Normal((u1 + u2) / 2.0, (v1 + v2) / 2.0, point, faceNormal);
+            // A degenerate parameterisation can give no normal there, and then
+            // nothing says which side is out.
+            if (faceNormal.Magnitude() <= Precision::Confusion()) {
+                return onPlane(plane, false);
+            }
+            if (faceNormal.Dot(gp_Vec(plane.Axis().Direction())) < 0.0) {
+                plane.SetAxis(plane.Axis().Reversed());
+            }
+            return onPlane(plane, true);
+        }
+
+        if (element.ShapeType() == TopAbs_EDGE) {
+            const TopoDS_Edge& edge = TopoDS::Edge(element);
+            if (BRepAdaptor_Curve curve(edge); curve.GetType() == GeomAbs_Line) {
+                const gp_Lin line = curve.Line();
+                const Base::Vector3d direction = toVector(line.Direction().XYZ());
+                Base::Vector3d through = toVector(
+                    curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2.0).XYZ()
+                );
+                if (picked) {
+                    // Onto the line, so a pick a little off the edge still cuts at the edge.
+                    const Base::Vector3d origin = toVector(line.Location().XYZ());
+                    through = origin + direction * ((*picked - origin) * direction);
+                }
+                return ElementPlane {direction, direction * through, false};
+            }
+            // A circle, an arc, or any other curve that lies flat.
+            gp_Pln plane;
+            if (!TopoShape(edge).findPlane(plane)) {
+                return std::nullopt;
+            }
+            return onPlane(plane, false);
+        }
+    }
+    catch (const Standard_Failure&) {
+        // An element OCCT cannot evaluate stands for no plane.
+    }
+    return std::nullopt;
 }
 
 void SectionAnalysis::planeFrame(const Base::Vector3d& normal, Base::Vector3d& u, Base::Vector3d& v)

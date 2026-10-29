@@ -415,6 +415,10 @@ void ViewProviderSectionAnalysis::attach(App::DocumentObject* pcFeat)
         )
     );
 
+    pickLock = new SoPickStyle();
+    pickLock->style = SoPickStyle::SHAPE;
+    pcRoot->insertChild(pickLock, 0);
+
     // Create the translucent cutting plane visual
     cuttingPlane = new SoSeparator();
     cuttingPlane->setName("SectionPlaneVisual");
@@ -1226,12 +1230,7 @@ void ViewProviderSectionAnalysis::updateClipPlaneEquation()
     // normal to keep the same side as OCCT.
     //
     // Nudge past the cut plane face, so the body's surface does not z-fight the cap.
-    // Which would cause visual flicker.
-    // Not an OCCT tolerance: those are for doubles, and Coin holds vertices as float.
-    // Precision::Confusion here would round away to nothing.
-    constexpr double clipEps = 0.01;
-
-    const double dClip = d - clipEps;
+    const double dClip = d - clipInset;
 
     const Base::Vector3d gNormal(-n.x, -n.y, -n.z);                      // global half-space normal
     const Base::Vector3d gPoint(n.x * dClip, n.y * dClip, n.z * dClip);  // global point on plane
@@ -1795,6 +1794,13 @@ void ViewProviderSectionAnalysis::setShowPlane(bool on)
 {
     if (planeSwitch) {
         planeSwitch->whichChild = on ? SO_SWITCH_ALL : SO_SWITCH_NONE;
+    }
+}
+
+void ViewProviderSectionAnalysis::setPickable(bool on)
+{
+    if (pickLock) {
+        pickLock->style = on ? SoPickStyle::SHAPE : SoPickStyle::UNPICKABLE;
     }
 }
 

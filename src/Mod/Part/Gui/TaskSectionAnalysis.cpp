@@ -21,18 +21,22 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QGroupBox>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
 
 
 #include <App/Application.h>
+#include <App/Datums.h>
 #include <App/Document.h>
 #include <Gui/Application.h>
 #include <Gui/BitmapFactory.h>
@@ -53,6 +57,7 @@
 #include <App/Material.h>
 #include <Mod/Part/App/FeatureSectionAnalysis.h>
 #include <Mod/Part/App/PartFeature.h>
+#include <Mod/Part/App/SectionCap.h>
 #include <Mod/Part/Gui/ViewProvider.h>
 
 #include <Base/Converter.h>
@@ -106,6 +111,23 @@ Base::Vector3d cameraViewDirection()
 }
 
 
+/// The preset combo row for a base orientation: the axis plane it is square to,
+/// either way round, or -1 (blank) for none.
+int presetIndexFor(const Base::Vector3d& base)
+{
+    using Preset = SectionAnalysisWidget::Preset;
+    if (isAlignedWith(base, Base::Vector3d::UnitZ)) {
+        return static_cast<int>(Preset::XY);
+    }
+    if (isAlignedWith(base, Base::Vector3d::UnitY)) {
+        return static_cast<int>(Preset::XZ);
+    }
+    if (isAlignedWith(base, Base::Vector3d::UnitX)) {
+        return static_cast<int>(Preset::YZ);
+    }
+    return -1;
+}
+
 /// Helps in picking initial preset.
 /// Returns a normal vector that is aligned with axis and points in the same
 /// direction as the camera's view vector, unless current is already aligned
@@ -121,12 +143,24 @@ Base::Vector3d presetNormal(const Base::Vector3d& axis, const Base::Vector3d& cu
 }  // namespace
 
 
+bool SectionAnalysisWidget::AlignGate::allow(
+    App::Document* /*doc*/,
+    App::DocumentObject* obj,
+    const char* subname
+)
+{
+    return panel->planeOfSelection(obj, subname, std::nullopt).has_value();
+}
+
 SectionAnalysisWidget::SectionAnalysisWidget(
     Part::SectionAnalysis* feat,
     ViewProviderSectionAnalysis* vp,
     QWidget* parent
 )
     : QWidget(parent)
+    // Attached only while waiting for a pick, and unresolved, so a face inside
+    // a Part or a link comes with the full path its placement is taken along.
+    , Gui::SelectionObserver(false, Gui::ResolveMode::NoResolve)
     , feature(feat)
     , viewProvider(vp)
 {
@@ -153,6 +187,7 @@ SectionAnalysisWidget::SectionAnalysisWidget(
 
 SectionAnalysisWidget::~SectionAnalysisWidget()
 {
+    disarmAlign();
     // The hint belongs to the panel, so it has to go when the panel does
 }
 
@@ -197,19 +232,7 @@ void SectionAnalysisWidget::setupUi()
 
     // The preset comes from the base, not from the plane: a tilt bakes itself
     // into PlaneNormal, so asking the plane would say "none" for anything tilted.
-    const Base::Vector3d base = feature->AngleBase.getValue();
-    if (isAlignedWith(base, Base::Vector3d::UnitZ)) {
-        presetCombo->setCurrentIndex(static_cast<int>(Preset::XY));
-    }
-    else if (isAlignedWith(base, Base::Vector3d::UnitY)) {
-        presetCombo->setCurrentIndex(static_cast<int>(Preset::XZ));
-    }
-    else if (isAlignedWith(base, Base::Vector3d::UnitX)) {
-        presetCombo->setCurrentIndex(static_cast<int>(Preset::YZ));
-    }
-    else {
-        presetCombo->setCurrentIndex(-1);
-    }
+    presetCombo->setCurrentIndex(presetIndexFor(feature->AngleBase.getValue()));
 
     // Angle adjustments (tilt the plane from the preset orientation)
     angleLabel1 = new QLabel(tr("X Angle:"), this);
@@ -245,6 +268,19 @@ void SectionAnalysisWidget::setupUi()
     flipCheck = new QCheckBox(tr("Flip Direction"), this);
     flipCheck->setChecked(feature->FlipCut.getValue());
     planeLayout->addWidget(flipCheck, 4, 0, 1, 2);
+
+    alignButton = new QPushButton(tr("Align to Face or Edge"), this);
+    alignButton->setCheckable(true);
+    alignButton->setToolTip(
+        tr("Put the plane on a flat face, in the plane of a circular edge,\n"
+           "or square to a straight edge. Select one in the 3D view first,\n"
+           "or press this and then click one.")
+    );
+    planeLayout->addWidget(alignButton, 5, 0, 1, 2);
+    alignHint = new QLabel(this);
+    alignHint->setWordWrap(true);
+    alignHint->hide();
+    planeLayout->addWidget(alignHint, 6, 0, 1, 2);
 
     mainLayout->addWidget(planeGroup);
 
@@ -347,6 +383,7 @@ void SectionAnalysisWidget::setupConnections()
         recompute();
     });
     connect(flipCheck, &QCheckBox::toggled, this, &SectionAnalysisWidget::onFlipToggled);
+    connect(alignButton, &QPushButton::toggled, this, &SectionAnalysisWidget::onAlignToggled);
     connect(sectionColorBtn, &Gui::ColorButton::changed, this, [this]() {
         onSectionColorChanged(sectionColorBtn->color());
     });
@@ -468,6 +505,203 @@ void SectionAnalysisWidget::centreOffsetOnSources(const Base::Vector3d& normal)
 
     const QSignalBlocker blockOffset(offsetSpin);
     offsetSpin->setValue(feature->PlaneOffset.getValue());
+}
+
+void SectionAnalysisWidget::onAlignToggled(bool on)
+{
+    if (!on) {
+        disarmAlign();
+        return;
+    }
+
+    // Something already selected is the element meant, if it stands for a plane.
+    for (const auto& sel : Gui::Selection().getSelectionEx(
+             feature->getDocument()->getName(),
+             App::DocumentObject::getClassTypeId(),
+             Gui::ResolveMode::NoResolve
+         )) {
+        std::vector<std::string> subnames = sel.getSubNames();
+        if (subnames.empty()) {
+            subnames.emplace_back();  // a whole object, such as a datum plane
+        }
+        const auto& points = sel.getPickedPoints();
+        for (std::size_t i = 0; i < subnames.size(); ++i) {
+            std::optional<Base::Vector3d> picked;
+            if (i < points.size()) {
+                picked = points[i];
+            }
+            if (auto plane = planeOfSelection(sel.getObject(), subnames[i].c_str(), picked)) {
+                {
+                    const QSignalBlocker blockAlign(alignButton);
+                    alignButton->setChecked(false);
+                }
+                Gui::Selection().clearSelection();
+                alignTo(*plane);
+                return;
+            }
+        }
+    }
+
+    alignHint->setText(
+        tr("Click a flat face, a circular or straight edge, or a datum plane or line in the 3D view.")
+    );
+    alignHint->show();
+    attachSelection();
+    // Clicks have to reach the faces behind the section's own plane and caps.
+    if (viewProvider) {
+        viewProvider->setPickable(false);
+    }
+    // Only what the plane can align to highlights under the cursor.
+    Gui::Selection().addSelectionGate(new AlignGate(this), Gui::ResolveMode::NoResolve);
+    alignGate = Gui::Selection().getSelectionGate(feature->getDocument());
+}
+
+void SectionAnalysisWidget::disarmAlign()
+{
+    detachSelection();
+    // The gate is the selection's, not ours, once installed: remove it only if
+    // nobody has put another in its place.
+    if (alignGate && Gui::Selection().getSelectionGate(feature->getDocument()) == alignGate) {
+        Gui::Selection().rmvSelectionGate();
+    }
+    alignGate = nullptr;
+    if (viewProvider) {
+        viewProvider->setPickable(true);
+    }
+    if (alignHint) {
+        alignHint->hide();
+    }
+}
+
+void SectionAnalysisWidget::onSelectionChanged(const Gui::SelectionChanges& msg)
+{
+    if (msg.Type != Gui::SelectionChanges::AddSelection) {
+        return;
+    }
+    App::Document* doc = feature->getDocument();
+    if (!msg.pDocName || std::strcmp(msg.pDocName, doc->getName()) != 0) {
+        return;
+    }
+    std::optional<Base::Vector3d> picked;
+    if (msg.hasPickedPoint) {
+        picked = Base::Vector3d(msg.x, msg.y, msg.z);
+    }
+    const auto plane = planeOfSelection(doc->getObject(msg.pObjectName), msg.pSubName, picked);
+    if (!plane) {
+        alignHint->setText(
+            tr("That stands for no plane. Click a flat face, a circular or straight edge, "
+               "or a datum plane or line.")
+        );
+        return;
+    }
+
+    // Not from inside the selection's own notification: the pick is still being
+    // delivered to the other observers, and moving the plane recomputes.
+    QTimer::singleShot(0, this, [this, plane = *plane]() {
+        alignButton->setChecked(false);  // disarms, before the selection is cleared
+        Gui::Selection().clearSelection();
+        alignTo(plane);
+    });
+}
+
+std::optional<Part::SectionAnalysis::ElementPlane> SectionAnalysisWidget::planeOfSelection(
+    const App::DocumentObject* obj,
+    const char* subname,
+    const std::optional<Base::Vector3d>& picked
+) const
+{
+    if (!obj) {
+        return std::nullopt;
+    }
+    if (!subname) {
+        subname = "";
+    }
+    Base::Matrix4D placement;
+    const App::DocumentObject* target = obj->getSubObject(subname, nullptr, &placement);
+    // The section's own plane and caps are not what anyone means to align to.
+    if (!target || target == feature || obj == feature) {
+        return std::nullopt;
+    }
+
+    std::optional<Part::SectionAnalysis::ElementPlane> plane;
+    if (const auto* datum = dynamic_cast<const App::DatumElement*>(target);
+        datum && (datum->isDerivedFrom<App::Plane>() || datum->isDerivedFrom<App::Line>())) {
+        // A datum has no shape to ask, but its placement says it all.
+        const Base::Vector3d origin = placement * Base::Vector3d();
+        Base::Vector3d direction = placement * datum->getBaseDirection() - origin;
+        if (direction.Length() <= minUnitMagnitude) {
+            return std::nullopt;
+        }
+        direction.Normalize();
+        Base::Vector3d through = origin;
+        if (picked && datum->isDerivedFrom<App::Line>()) {
+            through = origin + direction * ((*picked - origin) * direction);
+        }
+        plane = Part::SectionAnalysis::ElementPlane {direction, direction * through, false};
+    }
+    else {
+        // Same lookup as Std_AlignToSelection (Part::Feature::getCameraAlignmentDirection).
+        const TopoDS_Shape element = Part::Feature::getShape(
+            obj,
+            Part::ShapeOption::NeedSubElement | Part::ShapeOption::ResolveLink
+                | Part::ShapeOption::Transform,
+            subname
+        );
+        plane = Part::SectionAnalysis::planeOfElement(element, picked);
+        // A face only knows its outside when it bounds a solid; a sheet's face
+        // can face either way.
+        if (plane && plane->outward
+            && !Part::SectionCap::isClosedSolid(Part::Feature::getShape(
+                obj,
+                Part::ShapeOption::ResolveLink | Part::ShapeOption::Transform,
+                subname
+            ))) {
+            plane->outward = false;
+        }
+    }
+
+    if (plane && !plane->outward && plane->normal * cameraViewDirection() > 0.0) {
+        // Nothing says which side is out, so cut away the side nearer the
+        // camera, as the view-direction preset does.
+        plane->normal = -plane->normal;
+        plane->offset = -plane->offset;
+    }
+    return plane;
+}
+
+void SectionAnalysisWidget::alignTo(const Part::SectionAnalysis::ElementPlane& plane)
+{
+    const PanelWrite writing(this);
+
+    // Stored as the element gives it, so PlaneNormal reads plainly: flipping
+    // would turn it into the material.
+    if (feature->FlipCut.getValue()) {
+        feature->FlipCut.setValue(false);
+        const QSignalBlocker blockFlip(flipCheck);
+        flipCheck->setChecked(false);
+    }
+
+    // Past the clip inset, so the picked face survives: a plane on the face, or
+    // within the inset of it, clips the face away and caps nothing, and the
+    // solid shows hollow (#8). Remove once coincident faces are capped.
+    const double offset = plane.offset + 2.0 * ViewProviderSectionAnalysis::clipInset;
+
+    resetTiltAngles();
+    feature->PlaneNormal.setValue(plane.normal);
+    feature->AngleBase.setValue(plane.normal);
+    feature->PlaneOffset.setValue(offset);
+    {
+        const QSignalBlocker blockPreset(presetCombo);
+        presetCombo->setCurrentIndex(presetIndexFor(plane.normal));
+    }
+    applyPresetAngleLabels(static_cast<Preset>(presetCombo->currentIndex()));
+    {
+        const QSignalBlocker blockOffset(offsetSpin);
+        offsetSpin->setValue(offset);
+    }
+    alignHint->hide();
+
+    recompute();
 }
 
 void SectionAnalysisWidget::onPresetChanged(int index)
@@ -662,6 +896,7 @@ void SectionAnalysisWidget::recompute()
 
 bool SectionAnalysisWidget::accept()
 {
+    disarmAlign();
     try {
         Base::Vector3d n = feature->PlaneNormal.getValue();
         // %.12g rather than %f: these are doubles, and a recorded macro should
@@ -698,6 +933,7 @@ bool SectionAnalysisWidget::accept()
 
 bool SectionAnalysisWidget::reject()
 {
+    disarmAlign();
     // Remove clipping before undo so the source VP is restored
     if (viewProvider) {
         viewProvider->hide();
