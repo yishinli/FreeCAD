@@ -149,7 +149,11 @@ bool SectionAnalysisWidget::AlignGate::allow(
     const char* subname
 )
 {
-    return panel->planeOfSelection(obj, subname, std::nullopt).has_value();
+    if (panel->planeOfSelection(obj, subname, std::nullopt)) {
+        return true;
+    }
+    notAllowedReason = QT_TRANSLATE_NOOP("QObject", "Not a flat face, a circular or straight edge, or a datum plane or line");
+    return false;
 }
 
 SectionAnalysisWidget::SectionAnalysisWidget(
@@ -522,7 +526,10 @@ void SectionAnalysisWidget::onAlignToggled(bool on)
          )) {
         std::vector<std::string> subnames = sel.getSubNames();
         if (subnames.empty()) {
-            subnames.emplace_back();  // a whole object, such as a datum plane
+            // A whole object: a datum plane or line, or a shape that is a single
+            // face (a Part::Plane, a face made from a sketch), which then
+            // aligns to that face.
+            subnames.emplace_back();
         }
         const auto& points = sel.getPickedPoints();
         for (std::size_t i = 0; i < subnames.size(); ++i) {
@@ -546,8 +553,10 @@ void SectionAnalysisWidget::onAlignToggled(bool on)
         tr("Click a flat face, a circular or straight edge, or a datum plane or line in the 3D view.")
     );
     alignHint->show();
+    alignArmed = true;
     attachSelection();
     // Clicks have to reach the faces behind the section's own plane and caps.
+    // (View3DInventorPy::getObjectInfo does not honour this, real picks do.)
     if (viewProvider) {
         viewProvider->setPickable(false);
     }
@@ -558,6 +567,13 @@ void SectionAnalysisWidget::onAlignToggled(bool on)
 
 void SectionAnalysisWidget::disarmAlign()
 {
+    // Nothing to undo unless armed. The destructor comes here too, and may run
+    // after the document has dropped the view provider.
+    if (!alignArmed) {
+        return;
+    }
+    alignArmed = false;
+    alignPending = false;
     detachSelection();
     // The gate is the selection's, not ours, once installed: remove it only if
     // nobody has put another in its place.
@@ -575,7 +591,8 @@ void SectionAnalysisWidget::disarmAlign()
 
 void SectionAnalysisWidget::onSelectionChanged(const Gui::SelectionChanges& msg)
 {
-    if (msg.Type != Gui::SelectionChanges::AddSelection) {
+    // A box or multiple selection delivers several picks at once: the first one counts.
+    if (msg.Type != Gui::SelectionChanges::AddSelection || alignPending) {
         return;
     }
     App::Document* doc = feature->getDocument();
@@ -588,16 +605,20 @@ void SectionAnalysisWidget::onSelectionChanged(const Gui::SelectionChanges& msg)
     }
     const auto plane = planeOfSelection(doc->getObject(msg.pObjectName), msg.pSubName, picked);
     if (!plane) {
+        // Only reached by selections that bypass the gate.
         alignHint->setText(
-            tr("That stands for no plane. Click a flat face, a circular or straight edge, "
-               "or a datum plane or line.")
+            tr("Not a flat face, a circular or straight edge, or a datum plane or line.")
         );
         return;
     }
 
     // Not from inside the selection's own notification: the pick is still being
     // delivered to the other observers, and moving the plane recomputes.
+    alignPending = true;
     QTimer::singleShot(0, this, [this, plane = *plane]() {
+        if (!alignPending) {
+            return;  // disarmed by hand in the meantime
+        }
         alignButton->setChecked(false);  // disarms, before the selection is cleared
         Gui::Selection().clearSelection();
         alignTo(plane);

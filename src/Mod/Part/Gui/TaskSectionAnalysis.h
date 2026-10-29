@@ -130,6 +130,10 @@ private:
     };
     /// The gate installed while waiting, to recognise it when removing it.
     const Gui::SelectionGate* alignGate = nullptr;
+    /// Waiting for a pick: the observer, the gate and the pick lock are in place.
+    bool alignArmed = false;
+    /// A pick has been taken and its alignment is queued; further picks are ignored.
+    bool alignPending = false;
 
     /// The plane a selected element stands for, oriented for the cut.
     std::optional<Part::SectionAnalysis::ElementPlane> planeOfSelection(
