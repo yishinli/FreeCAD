@@ -136,7 +136,7 @@ public:
     /// body's surface does not z-fight the cap. Not an OCCT tolerance: those
     /// are for doubles, and Coin holds vertices as float, so Precision::Confusion
     /// would round away to nothing. A face this close to the plane on the kept
-    /// side is clipped too.
+    /// side is clipped too, which is why the cap is sliced here as well.
     static constexpr double clipInset = 0.01;
 
     /// The spacing to hatch at: the property, or one derived from the model when

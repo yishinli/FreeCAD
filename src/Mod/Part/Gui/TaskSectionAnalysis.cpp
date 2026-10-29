@@ -702,15 +702,10 @@ void SectionAnalysisWidget::alignTo(const Part::SectionAnalysis::ElementPlane& p
         flipCheck->setChecked(false);
     }
 
-    // Past the clip inset, so the picked face survives: a plane on the face, or
-    // within the inset of it, clips the face away and caps nothing, and the
-    // solid shows hollow (#8). Remove once coincident faces are capped.
-    const double offset = plane.offset + 2.0 * ViewProviderSectionAnalysis::clipInset;
-
     resetTiltAngles();
     feature->PlaneNormal.setValue(plane.normal);
     feature->AngleBase.setValue(plane.normal);
-    feature->PlaneOffset.setValue(offset);
+    feature->PlaneOffset.setValue(plane.offset);
     {
         const QSignalBlocker blockPreset(presetCombo);
         presetCombo->setCurrentIndex(presetIndexFor(plane.normal));
@@ -718,7 +713,7 @@ void SectionAnalysisWidget::alignTo(const Part::SectionAnalysis::ElementPlane& p
     applyPresetAngleLabels(static_cast<Preset>(presetCombo->currentIndex()));
     {
         const QSignalBlocker blockOffset(offsetSpin);
-        offsetSpin->setValue(offset);
+        offsetSpin->setValue(plane.offset);
     }
     alignHint->hide();
 

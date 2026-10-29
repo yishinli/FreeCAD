@@ -120,6 +120,28 @@ TEST(SectionCapSlice, testPlaneBelowTheBoxCrossesNothing)
     EXPECT_TRUE(sliceTriangles(box(10), Z, -50.0).empty());
 }
 
+TEST(SectionCapSlice, testAPlaneOnAFaceCapsTheSolidOnTheKeptSide)
+{
+    // On the plane counts as the removed side. The walls of a box end on its
+    // top face, so a plane there cuts them and the kept box below is capped;
+    // turned round, the box is all removed and only touches the plane, so
+    // nothing is left of it.
+    const auto loops = chainLoops(sliceTriangles(box(10), Z, 10.0));
+    ASSERT_EQ(loops.size(), 1);
+    EXPECT_NEAR(soupArea(fillLoops(loops, U, V)), 100.0, 1e-3);
+    EXPECT_TRUE(sliceTriangles(box(10), -Z, -10.0).empty());
+}
+
+TEST(SectionCapSlice, testAPlaneJustInsideAFaceCapsTheSolidOnTheKeptSide)
+{
+    // Where the viewer slices: its clip inset into the kept material.
+    constexpr double inset = 0.01;
+    const auto loops = chainLoops(sliceTriangles(box(10), Z, 10.0 - inset));
+    ASSERT_EQ(loops.size(), 1);
+    EXPECT_NEAR(soupArea(fillLoops(loops, U, V)), 100.0, 1e-3);
+    EXPECT_TRUE(sliceTriangles(box(10), -Z, -10.0 - inset).empty());
+}
+
 TEST(SectionCapSlice, testEverySegmentLiesOnThePlane)
 {
     const auto segments = sliceTriangles(box(10), Z, 3.5);

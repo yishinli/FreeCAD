@@ -222,7 +222,12 @@ std::optional<Part::SectionCap::Segment> SectionCap::triangleCrossing(
 
     // Half open test: exactly zero or two edges cross, so a vertex sitting
     // on the plane cannot yield a duplicate or a dangling segment.
-    const bool above[3] = {s[0] > 0.0, s[1] > 0.0, s[2] > 0.0};
+    //
+    // On the plane counts as above, the side the cut removes, as it does for
+    // OCCT and the clip planes, which keep only n.p < d. Kept material that
+    // ends on the plane is then cut there and capped, and a solid that only
+    // touches the plane from the removed side leaves nothing behind.
+    const bool above[3] = {s[0] >= 0.0, s[1] >= 0.0, s[2] >= 0.0};
     if (above[0] == above[1] && above[1] == above[2]) {
         return std::nullopt;  // all on one side, or all on the plane
     }

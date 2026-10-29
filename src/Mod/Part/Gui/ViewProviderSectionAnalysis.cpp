@@ -886,6 +886,12 @@ void ViewProviderSectionAnalysis::updateCapFromScene()
     if (!feat->cutPlane(n, d)) {
         return;
     }
+    // Capped where the clip planes cut, not on the plane itself. A face lying
+    // on the plane, or within the inset of it, is clipped away, and slicing at
+    // the plane would find nothing to cap: the solid showed hollow. Slicing at
+    // the inset caps it where it was clipped, and a solid wholly on the removed
+    // side no longer leaves a cap behind from its touching face.
+    d -= clipInset;
 
     Base::Vector3d u;
     Base::Vector3d v;
