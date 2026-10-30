@@ -100,8 +100,15 @@ struct DocumentP
     int bookedTransaction {0};
 
     std::string programVersion;
-    /// Opened for viewing only: the file it was read from, never to be written.
+    /// Opened for viewing only: the file it was read from, never to be written,
+    /// as given and resolved. The second is what is compared when the file
+    /// system cannot be asked, so that the check fails closed.
     std::string readOnlyFile;
+    std::string readOnlyResolved;
+    /// isReadOnlyFile() runs for every tree item: the last FileName it was asked
+    /// about, and the answer, to keep the file system out of it.
+    mutable std::string readOnlyAskedFor;
+    mutable bool readOnlyAnswer {false};
     mutable HasherMap hashers;
     std::multimap<const App::DocumentObject*, std::unique_ptr<App::DocumentObjectExecReturn>>
         _RecomputeLog;

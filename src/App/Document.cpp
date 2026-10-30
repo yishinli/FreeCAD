@@ -1976,15 +1976,58 @@ fs::path fsPath(const char* utf8)
 #endif
 }
 
-/// The same file on disk, however it is spelt: case, links, relative parts.
-bool sameFile(const char* file, const std::string& other)
+bool sameName(const std::string& one, const std::string& other)
 {
-    if (!file || *file == '\0' || other.empty()) {
+#ifdef FC_OS_WIN32
+    return QString::fromUtf8(one.c_str()).compare(QString::fromUtf8(other.c_str()), Qt::CaseInsensitive)
+        == 0;
+#else
+    return one == other;
+#endif
+}
+
+/// Absolute, without links or dot parts where they can be resolved, and in
+/// one spelling for the long-path forms Windows hands back.
+std::string resolvedName(const char* file)
+{
+    std::error_code ec;
+    fs::path path = fs::absolute(fsPath(file), ec);
+    if (ec) {
+        path = fsPath(file);
+    }
+    const fs::path resolved = fs::weakly_canonical(path, ec);
+    path = (ec ? path : resolved).lexically_normal();
+#ifdef FC_OS_WIN32
+    QString name = QString::fromStdWString(path.native());
+    if (name.startsWith(QStringLiteral("\\\\?\\UNC\\"))) {
+        name = QStringLiteral("\\\\") + name.mid(8);
+    }
+    else if (name.startsWith(QStringLiteral("\\\\?\\"))) {
+        name = name.mid(4);
+    }
+    return name.toStdString();
+#else
+    return path.native();
+#endif
+}
+
+/// Whether `file` is the one opened for viewing only, however it is spelt:
+/// case, links, relative parts, a mapped drive for a share. Fails closed:
+/// when the file system cannot answer, a name that resolves the same is refused.
+bool isReadOnlyTarget(const DocumentP& d, const char* file)
+{
+    if (!file || *file == '\0' || d.readOnlyFile.empty()) {
         return false;
     }
+    if (sameName(file, d.readOnlyFile)) {
+        return true;
+    }
     std::error_code ec;
-    const bool same = fs::equivalent(fsPath(file), fsPath(other.c_str()), ec);
-    return same && !ec;
+    const bool same = fs::equivalent(fsPath(file), fsPath(d.readOnlyFile.c_str()), ec);
+    if (!ec) {
+        return same;
+    }
+    return sameName(resolvedName(file), d.readOnlyResolved);
 }
 
 /// Started to view files, not to edit them (--set-config OpenReadOnly=1).
@@ -2048,7 +2091,7 @@ bool Document::saveToFile(const char* filename) const
     }
     // Opened for viewing only. Here rather than in the GUI, so that a macro's
     // save() cannot write over it either; a copy under another name can.
-    if (sameFile(nativePath.c_str(), d->readOnlyFile)) {
+    if (isReadOnlyTarget(*d, filename) || isReadOnlyTarget(*d, nativePath.c_str())) {
         throw Base::FileWritePermissionException(originalFileInfo);
     }
 
@@ -2183,6 +2226,9 @@ void Document::restore(const char* filename,
     clearUndos();
     d->activeObject = nullptr;
     d->readOnlyFile = openReadOnly() ? FileName.getStrValue() : std::string();
+    d->readOnlyResolved = d->readOnlyFile.empty() ? std::string()
+                                                  : resolvedName(d->readOnlyFile.c_str());
+    d->readOnlyAskedFor.clear();
 
     bool signal = false;
     Document* activeDoc = GetApplication().getActiveDocument();
@@ -2442,8 +2488,14 @@ bool Document::isAutoCreated() const {
 
 bool Document::isReadOnlyFile() const {
     std::string filename = FileName.getValue();
-    if (sameFile(filename.c_str(), d->readOnlyFile)) {
-        return true;
+    if (!d->readOnlyFile.empty()) {
+        if (filename != d->readOnlyAskedFor) {
+            d->readOnlyAskedFor = filename;
+            d->readOnlyAnswer = isReadOnlyTarget(*d, filename.c_str());
+        }
+        if (d->readOnlyAnswer) {
+            return true;
+        }
     }
     Base::FileInfo documentFileInfo(filename);
     return documentFileInfo.exists() && !documentFileInfo.isWritable();
