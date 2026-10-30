@@ -1663,6 +1663,23 @@ bool Document::warnIfOlderVersion()
 bool Document::save()
 {
     if (d->_pcDocument->isSaved()) {
+        // Opened for viewing only, or a file that cannot be written: say so and
+        // offer a copy, rather than fail the save and blame permissions.
+        if (d->_pcDocument->isReadOnlyFile()) {
+            const int ret = QMessageBox::question(
+                getMainWindow(),
+                QObject::tr("Document is read-only"),
+                QObject::tr(
+                    "\"%1\" was opened read-only and cannot be overwritten.\n\n"
+                    "Save the changes as a copy under a new name?"
+                )
+                    .arg(QString::fromUtf8(d->_pcDocument->Label.getValue())),
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::No
+            );
+            return ret == QMessageBox::Yes && saveAs();
+        }
+
         // Warn if this document was created with an older FreeCAD version
         if (!warnIfOlderVersion()) {
             return false;
@@ -1774,6 +1791,11 @@ bool Document::saveAs()
         if (!name.endsWith(QStringLiteral(".FCStd"), Qt::CaseInsensitive)) {
             name += QStringLiteral(".FCStd");
         }
+    }
+    // Not the file it may not overwrite: offer a copy beside it.
+    if (d->_pcDocument->isReadOnlyFile()) {
+        const QFileInfo original(name);
+        name = original.dir().filePath(original.completeBaseName() + QStringLiteral("_copy.FCStd"));
     }
     QString fn = FileDialog::getSaveFileName(
         getMainWindow(),
@@ -1904,6 +1926,11 @@ bool Document::saveCopy()
         if (!name.endsWith(QStringLiteral(".FCStd"), Qt::CaseInsensitive)) {
             name += QStringLiteral(".FCStd");
         }
+    }
+    // Not the file it may not overwrite: offer a copy beside it.
+    if (d->_pcDocument->isReadOnlyFile()) {
+        const QFileInfo original(name);
+        name = original.dir().filePath(original.completeBaseName() + QStringLiteral("_copy.FCStd"));
     }
     QString fn = FileDialog::getSaveFileName(
         getMainWindow(),
