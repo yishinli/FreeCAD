@@ -237,6 +237,7 @@ private:
     Gui::CoinPtr<Gui::SoTransformDragger> planeDragger;
     Base::Placement draggerBase;  //!< where the dragger sat when the drag began
     bool planeDragging = false;   //!< the dragger is moving the plane, write only
+    bool recomputeQueued = false;  //!< a recompute after a source's visibility change is pending
     Base::Vector3d dragPoint;     //!< where the held handle is, on the plane, mid-drag
     /// Set by the user, not saved: a picked point means nothing once the file is closed.
     std::optional<Base::Vector3d> pivot;

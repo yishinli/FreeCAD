@@ -67,6 +67,7 @@
 
 #include <App/Application.h>
 #include <App/Document.h>
+#include <App/DocumentObserver.h>
 #include <App/GeoFeature.h>
 #include <Inventor/actions/SoGetBoundingBoxAction.h>
 #include <App/GeoFeatureGroupExtension.h>
@@ -1334,11 +1335,31 @@ void ViewProviderSectionAnalysis::slotChangedObject(
     }
 
     // Defer the recompute out of the property-change signal
-    feat->enforceRecompute();
-    std::string docName = feat->getDocument()->getName();
-    QTimer::singleShot(0, [docName]() {
-        if (auto* doc = App::GetApplication().getDocument(docName.c_str())) {
-            doc->recompute();
+    // One recompute however many sources changed at once (Isolate hides many).
+    if (recomputeQueued) {
+        return;
+    }
+    recomputeQueued = true;
+    QTimer::singleShot(0, [section = App::DocumentObjectT(feat)]() {
+        auto* obj = section.getObject();
+        if (!obj) {
+            return;
+        }
+        if (auto* vp = dynamic_cast<ViewProviderSectionAnalysis*>(
+                Gui::Application::Instance->getViewProvider(obj)
+            )) {
+            vp->recomputeQueued = false;
+        }
+        // Only the section: a whole-document recompute would also rebuild
+        // unrelated touched objects. Showing or hiding a source changes nothing
+        // the file keeps, so a document that was unmodified stays so.
+        App::Document* doc = obj->getDocument();
+        auto* guiDoc = Gui::Application::Instance->getDocument(doc);
+        const bool wasModified = guiDoc && guiDoc->isModified();
+        obj->enforceRecompute();
+        doc->recomputeFeature(obj);
+        if (guiDoc && !wasModified) {
+            guiDoc->setModified(false);
         }
     });
 }
