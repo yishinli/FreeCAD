@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <optional>
+#include <utility>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -85,6 +87,9 @@ namespace
 /// geometric claim that is not being made.
 constexpr double minUnitMagnitude = 1e-10;
 
+/// How far the plane may be from the one the panel last set and still be it.
+constexpr double lastPanelTolerance = 1e-9;
+
 /// True when `normal` points along `axis`, either way round.
 ///
 /// Spelled out because the alternative - three chained comparisons of each
@@ -94,6 +99,108 @@ bool isAlignedWith(const Base::Vector3d& normal, const Base::Vector3d& axis)
 {
     constexpr double alignmentTolerance = 1e-6;
     return std::abs(std::abs(normal * axis) - 1.0) < alignmentTolerance;
+}
+
+/// Rodrigues' rotation of v about the unit axis k by theta.
+Base::Vector3d rotateAbout(const Base::Vector3d& v, const Base::Vector3d& k, double theta)
+{
+    const double ct = std::cos(theta);
+    const double st = std::sin(theta);
+    return v * ct + k.Cross(v) * st + k * (k * v) * (1.0 - ct);
+}
+
+/// The two world axes the tilt boxes turn a base normal about.
+void tiltAxes(const Base::Vector3d& baseNormal, Base::Vector3d& angle1Axis, Base::Vector3d& angle2Axis)
+{
+    // Rotate about world axes lying in the plane, not about an arbitrary frame:
+    // the angles are meant to read as "tilt about X", and the boxes are labelled
+    // that way.
+    // Whichever world axis the normal leans on most is the one there is no
+    // point turning about; the other two are the tilt axes. Picking the largest
+    // component rather than testing against a threshold keeps this right for the
+    // presets that are not axis aligned - view direction, or none at all - where a
+    // threshold could fall through and hand back an axis nearly parallel to the
+    // normal, which is a degenerate pivot.
+    const double alongX = std::abs(baseNormal.x);
+    const double alongY = std::abs(baseNormal.y);
+    const double alongZ = std::abs(baseNormal.z);
+    if (alongZ >= alongX && alongZ >= alongY) {
+        angle1Axis = Base::Vector3d::UnitX;
+        angle2Axis = Base::Vector3d::UnitY;
+    }
+    else if (alongY >= alongX) {
+        angle1Axis = Base::Vector3d::UnitX;
+        angle2Axis = Base::Vector3d::UnitZ;
+    }
+    else {
+        angle1Axis = Base::Vector3d::UnitY;
+        angle2Axis = Base::Vector3d::UnitZ;
+    }
+}
+
+/// The signed world axis a normal leans on most, ties broken as tiltAxes()
+/// breaks them. From it, any normal is reached by tilts of at most 90 degrees.
+Base::Vector3d nearestAxis(const Base::Vector3d& normal)
+{
+    const double alongX = std::abs(normal.x);
+    const double alongY = std::abs(normal.y);
+    const double alongZ = std::abs(normal.z);
+    if (alongZ >= alongX && alongZ >= alongY) {
+        return normal.z < 0.0 ? -Base::Vector3d::UnitZ : Base::Vector3d::UnitZ;
+    }
+    if (alongY >= alongX) {
+        return normal.y < 0.0 ? -Base::Vector3d::UnitY : Base::Vector3d::UnitY;
+    }
+    return normal.x < 0.0 ? -Base::Vector3d::UnitX : Base::Vector3d::UnitX;
+}
+
+/// The turns about the tilt axes that take baseNormal to normal, the inverse of
+/// SectionAnalysisWidget::applyAngles(), or nothing if no turns within
+/// maxAngle do.
+///
+/// Turning about the second axis leaves the part along it alone, so the first
+/// turn alone has to bring the normal's part along it: a cos t + b sin t = c,
+/// with two roots. The second turn is then whatever is left, about its own axis.
+/// Two roots can both hold; the smaller tilt is the one to show.
+std::optional<std::pair<double, double>> solveTilt(
+    const Base::Vector3d& baseNormal,
+    const Base::Vector3d& normal,
+    double maxAngle
+)
+{
+    constexpr double reachTolerance = 1e-7;
+    Base::Vector3d angle1Axis;
+    Base::Vector3d angle2Axis;
+    tiltAxes(baseNormal, angle1Axis, angle2Axis);
+
+    const double a = baseNormal * angle2Axis;
+    const double b = angle1Axis.Cross(baseNormal) * angle2Axis;
+    const double c = normal * angle2Axis;
+    const double r = std::hypot(a, b);
+    if (r <= minUnitMagnitude) {
+        return std::nullopt;
+    }
+    const double limit = maxAngle + reachTolerance;
+    const double phase = std::atan2(b, a);
+    const double spread = std::acos(std::clamp(c / r, -1.0, 1.0));
+    std::optional<std::pair<double, double>> best;
+    for (const double root : {phase + spread, phase - spread}) {
+        const double turn1 = std::remainder(root, 2.0 * std::numbers::pi);
+        const Base::Vector3d turned = rotateAbout(baseNormal, angle1Axis, turn1);
+        const Base::Vector3d from = turned - angle2Axis * (turned * angle2Axis);
+        const Base::Vector3d to = normal - angle2Axis * (normal * angle2Axis);
+        const double turn2 = std::atan2(angle2Axis * from.Cross(to), from * to);
+        const Base::Vector3d reached = rotateAbout(turned, angle2Axis, turn2);
+        if (std::abs(turn1) > limit || std::abs(turn2) > limit
+            || (reached - normal).Length() > reachTolerance) {
+            continue;
+        }
+        if (!best
+            || std::abs(turn1) + std::abs(turn2) < std::abs(best->first) + std::abs(best->second)) {
+            best = std::pair {turn1, turn2};
+        }
+    }
+    return best;
 }
 
 /// Work out which way the camera is looking
@@ -182,7 +289,10 @@ SectionAnalysisWidget::SectionAnalysisWidget(
             if (&obj != feature) {
                 return;
             }
-            if (&prop == &feature->PlaneNormal || &prop == &feature->PlaneOffset) {
+            // AngleBase too: undo can put it back after the plane, and the
+            // angles read against the old base until it does.
+            if (&prop == &feature->PlaneNormal || &prop == &feature->PlaneOffset
+                || &prop == &feature->AngleBase) {
                 refreshFromFeature();
             }
         }
@@ -446,31 +556,61 @@ void SectionAnalysisWidget::refreshFromFeature()
     }
     normal /= len;
 
-    // The two angles that would take the base normal to this one, which is the
-    // inverse of what applyAngles() does. Measured about the same axes, so the
-    // boxes keep meaning what their labels say.
-    Base::Vector3d baseNormal;
-    Base::Vector3d angle1Axis;
-    Base::Vector3d angle2Axis;
-    angleReferenceFrame(baseNormal, angle1Axis, angle2Axis);
-
-    const double a2 = std::asin(std::clamp(normal * angle2Axis, -1.0, 1.0))
-        - std::asin(std::clamp(baseNormal * angle2Axis, -1.0, 1.0));
-    Base::Vector3d undone = normal;
-    const auto rodrigues = [](const Base::Vector3d& v, const Base::Vector3d& k, double theta) {
-        const double ct = std::cos(theta);
-        const double st = std::sin(theta);
-        return v * ct + k.Cross(v) * st + k * (k * v) * (1.0 - ct);
-    };
-    undone = rodrigues(undone, angle2Axis, -a2);
-    const double a1 = -(
-        std::asin(std::clamp(undone * angle1Axis, -1.0, 1.0))
-        - std::asin(std::clamp(baseNormal * angle1Axis, -1.0, 1.0))
-    );
-
+    // Both boxes have the same range.
     constexpr double toDegrees = 180.0 / std::numbers::pi;
-    angle1Spin->setValue(a1 * toDegrees);
-    angle2Spin->setValue(a2 * toDegrees);
+    const double maxAngle = angle1Spin->maximum() / toDegrees;
+
+    // The base is only what the panel last left. A plane set elsewhere - the
+    // property editor, a script, the dragger's turn handles - may be one no tilt
+    // of the base reaches, or one only a 90 degree tilt reaches, and the boxes
+    // then showed a preset and angles that read nothing like the plane. Such a
+    // plane starts again from the axis it leans on most, from which every plane
+    // is in range. A plane the panel set itself keeps the base it was set from,
+    // so typing 90 into a box is not undone by the next offset drag.
+    const bool setElsewhere = (normal - lastPanelNormal).Length() > lastPanelTolerance;
+    lastPanelNormal = normal;
+    Base::Vector3d baseNormal = feature->AngleBase.getValue();
+    auto tilt = solveTilt(baseNormal, normal, maxAngle);
+    const auto atLimit = [maxAngle](double turn) {
+        return std::abs(turn) >= maxAngle - lastPanelTolerance;
+    };
+    if (!tilt || (setElsewhere && (atLimit(tilt->first) || atLimit(tilt->second)))) {
+        baseNormal = nearestAxis(normal);
+        tilt = solveTilt(baseNormal, normal, maxAngle);
+        if (!tilt) {
+            baseNormal = normal;
+            tilt = std::pair {0.0, 0.0};
+        }
+        // Undo and redo put AngleBase back themselves, maybe after this.
+        //
+        // The write comes back here through the AngleBase listener. That inner
+        // pass finds the plane it was handed and a tilt in range, so it writes
+        // nothing and shows what this pass goes on to show.
+        if (!feature->getDocument()->isPerformingTransaction()) {
+            feature->AngleBase.setValue(baseNormal);
+        }
+    }
+
+    // The combo follows the base, also one undo put back. View Direction has no
+    // axis of its own, so it stays while the base is not on one.
+    const int basePreset = presetIndexFor(baseNormal);
+    const bool keepsViewDirection = basePreset < 0
+        && presetCombo->currentIndex() == static_cast<int>(Preset::ViewDirection);
+    if (presetCombo->currentIndex() != basePreset && !keepsViewDirection) {
+        {
+            const QSignalBlocker blockPreset(presetCombo);
+            presetCombo->setCurrentIndex(basePreset);
+        }
+        applyPresetAngleLabels(static_cast<Preset>(presetCombo->currentIndex()));
+    }
+
+    // applyAngles() turns the first axis the other way from its box. What would
+    // show as "-0.00" is 0.
+    const auto shown = [](double degrees) {
+        return std::abs(degrees) < 0.005 ? 0.0 : degrees;
+    };
+    angle1Spin->setValue(shown(-tilt->first * toDegrees));
+    angle2Spin->setValue(shown(tilt->second * toDegrees));
 }
 
 Base::Vector3d SectionAnalysisWidget::normalForPreset(Preset preset) const
@@ -705,6 +845,7 @@ void SectionAnalysisWidget::alignTo(const Part::SectionAnalysis::ElementPlane& p
     resetTiltAngles();
     feature->PlaneNormal.setValue(plane.normal);
     feature->AngleBase.setValue(plane.normal);
+    lastPanelNormal = plane.normal;
     feature->PlaneOffset.setValue(plane.offset);
     {
         const QSignalBlocker blockPreset(presetCombo);
@@ -737,6 +878,7 @@ void SectionAnalysisWidget::onPresetChanged(int index)
     resetTiltAngles();
     feature->PlaneNormal.setValue(normal);
     feature->AngleBase.setValue(normal);
+    lastPanelNormal = normal;
     centreOffsetOnSources(normal);
 
     recompute();
@@ -761,31 +903,7 @@ void SectionAnalysisWidget::angleReferenceFrame(
     // The orientation captured when the panel opened or a preset was picked
     // but never used again when changes were made
     baseNormal = feature->AngleBase.getValue();
-
-    // Rotate about world axes lying in the plane, not about an arbitrary frame:
-    // the angles are meant to read as "tilt about X", and the boxes are labelled
-    // that way.
-    // Whichever world axis the normal leans on most is the one there is no
-    // point turning about; the other two are the tilt axes. Picking the largest
-    // component rather than testing against a threshold keeps this right for the
-    // presets that are not axis aligned - view direction, or none at all - where a
-    // threshold could fall through and hand back an axis nearly parallel to the
-    // normal, which is a degenerate pivot.
-    const double alongX = std::abs(baseNormal.x);
-    const double alongY = std::abs(baseNormal.y);
-    const double alongZ = std::abs(baseNormal.z);
-    if (alongZ >= alongX && alongZ >= alongY) {
-        angle1Axis = Base::Vector3d::UnitX;
-        angle2Axis = Base::Vector3d::UnitY;
-    }
-    else if (alongY >= alongX) {
-        angle1Axis = Base::Vector3d::UnitX;
-        angle2Axis = Base::Vector3d::UnitZ;
-    }
-    else {
-        angle1Axis = Base::Vector3d::UnitY;
-        angle2Axis = Base::Vector3d::UnitZ;
-    }
+    tiltAxes(baseNormal, angle1Axis, angle2Axis);
 }
 
 
@@ -806,15 +924,9 @@ void SectionAnalysisWidget::applyAngles()
     Base::Vector3d angle2Axis;
     angleReferenceFrame(baseNormal, angle1Axis, angle2Axis);
 
-    // Rodrigues' rotation: rotate baseNormal around angle1Axis by a1, then around angle2Axis by a2
-    auto rodrigues = [](const Base::Vector3d& v, const Base::Vector3d& k, double theta) {
-        double ct = std::cos(theta);
-        double st = std::sin(theta);
-        return v * ct + k.Cross(v) * st + k * (k * v) * (1.0 - ct);
-    };
-
-    Base::Vector3d n = rodrigues(baseNormal, angle1Axis, a1);
-    n = rodrigues(n, angle2Axis, a2);
+    // Rotate baseNormal around angle1Axis by a1, then around angle2Axis by a2
+    Base::Vector3d n = rotateAbout(baseNormal, angle1Axis, a1);
+    n = rotateAbout(n, angle2Axis, a2);
 
     double len = n.Length();
     if (len > minUnitMagnitude) {
@@ -844,6 +956,7 @@ void SectionAnalysisWidget::applyAngles()
     const double newOffset = pivot * n;
 
     feature->PlaneNormal.setValue(n);
+    lastPanelNormal = n;
     feature->PlaneOffset.setValue(newOffset);
 
     // Tilting moves the offset too: same point, different distance along the

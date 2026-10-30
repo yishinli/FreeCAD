@@ -167,6 +167,11 @@ private:
     /// back does not overwrite the box being typed into.
     bool pushingToFeature = false;
 
+    /// The normal the panel last wrote or showed, to tell a plane the panel set
+    /// from one set elsewhere. Zero to start with, so the plane the panel opens
+    /// on counts as set elsewhere.
+    Base::Vector3d lastPanelNormal {0.0, 0.0, 0.0};
+
     /// Sets that flag for as long as it lives, early returns included.
     struct PanelWrite
     {
