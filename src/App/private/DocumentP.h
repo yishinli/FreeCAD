@@ -100,6 +100,8 @@ struct DocumentP
     int bookedTransaction {0};
 
     std::string programVersion;
+    /// Opened for viewing only: the file it was read from, never to be written.
+    std::string readOnlyFile;
     mutable HasherMap hashers;
     std::multimap<const App::DocumentObject*, std::unique_ptr<App::DocumentObjectExecReturn>>
         _RecomputeLog;

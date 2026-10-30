@@ -1965,6 +1965,37 @@ bool Document::save()
     return false;
 }
 
+namespace
+{
+fs::path fsPath(const char* utf8)
+{
+#ifdef FC_OS_WIN32
+    return fs::path(QString::fromUtf8(utf8).toStdWString());
+#else
+    return fs::path(utf8);
+#endif
+}
+
+/// The same file on disk, however it is spelt: case, links, relative parts.
+bool sameFile(const char* file, const std::string& other)
+{
+    if (!file || *file == '\0' || other.empty()) {
+        return false;
+    }
+    std::error_code ec;
+    const bool same = fs::equivalent(fsPath(file), fsPath(other.c_str()), ec);
+    return same && !ec;
+}
+
+/// Started to view files, not to edit them (--set-config OpenReadOnly=1).
+bool openReadOnly()
+{
+    const auto& config = Application::Config();
+    const auto it = config.find("OpenReadOnly");
+    return it != config.end() && it->second == "1";
+}
+}  // namespace
+
 bool Document::saveToFile(const char* filename) const
 {
     signalStartSave(*this, filename);
@@ -2013,6 +2044,11 @@ bool Document::saveToFile(const char* filename) const
     // check if file is writeable, then block the save if it is not.
     Base::FileInfo originalFileInfo(nativePath);
     if (originalFileInfo.exists() && !originalFileInfo.isWritable()) {
+        throw Base::FileWritePermissionException(originalFileInfo);
+    }
+    // Opened for viewing only. Here rather than in the GUI, so that a macro's
+    // save() cannot write over it either; a copy under another name can.
+    if (sameFile(nativePath.c_str(), d->readOnlyFile)) {
         throw Base::FileWritePermissionException(originalFileInfo);
     }
 
@@ -2146,6 +2182,7 @@ void Document::restore(const char* filename,
 {
     clearUndos();
     d->activeObject = nullptr;
+    d->readOnlyFile = openReadOnly() ? FileName.getStrValue() : std::string();
 
     bool signal = false;
     Document* activeDoc = GetApplication().getActiveDocument();
@@ -2405,6 +2442,9 @@ bool Document::isAutoCreated() const {
 
 bool Document::isReadOnlyFile() const {
     std::string filename = FileName.getValue();
+    if (sameFile(filename.c_str(), d->readOnlyFile)) {
+        return true;
+    }
     Base::FileInfo documentFileInfo(filename);
     return documentFileInfo.exists() && !documentFileInfo.isWritable();
 }
