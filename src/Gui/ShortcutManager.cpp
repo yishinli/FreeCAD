@@ -20,13 +20,18 @@
  *                                                                          *
  ****************************************************************************/
 
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <QShortcutEvent>
 #include <QApplication>
 
 #include <boost/algorithm/string/predicate.hpp>
 
+#include <App/Application.h>
 #include <Base/Console.h>
+#include <Base/FileInfo.h>
 #include <Base/Tools.h>
 #include "ShortcutManager.h"
 #include "Command.h"
@@ -34,6 +39,23 @@
 #include "Action.h"
 
 using namespace Gui;
+namespace fs = std::filesystem;
+
+namespace
+{
+constexpr const char* defaultStyle = "FreeCAD";
+
+// A user's style file comes before a shipped one of the same name.
+std::vector<fs::path> styleDirs()
+{
+    return {
+        fs::path(Base::FileInfo::stringToPath(App::Application::getUserAppDataDir()))
+            / "ShortcutStyles",
+        fs::path(Base::FileInfo::stringToPath(App::Application::getResourceDir())) / "Gui"
+            / "ShortcutStyles",
+    };
+}
+}  // namespace
 
 ShortcutManager::ShortcutManager()
 {
@@ -44,6 +66,7 @@ ShortcutManager::ShortcutManager()
     hSetting = hShortcuts->GetGroup("Settings");
     hSetting->Attach(this);
     timeout = hSetting->GetInt("ShortcutTimeout", 300);
+    loadStyle();
     timer.setSingleShot(true);
 
     QObject::connect(&timer, &QTimer::timeout, [this]() { onTimer(); });
@@ -89,6 +112,10 @@ void ShortcutManager::OnChange(Base::Subject<const char*>& src, const char* reas
     if (hSetting == &src) {
         if (boost::equals(reason, "ShortcutTimeout")) {
             timeout = hSetting->GetInt("ShortcutTimeout");
+        }
+        else if (boost::equals(reason, "Style")) {
+            loadStyle();
+            updateAllShortcuts();
         }
         return;
     }
@@ -149,20 +176,128 @@ void ShortcutManager::resetAll()
 {
     {
         Base::StateLocker lock(busy);
+        // Clearing takes the settings group along; the style is not a user shortcut
+        const std::string style = getStyle();
         hShortcuts->Clear();
         hPriorities->Clear();
+        if (style != defaultStyle) {
+            hSetting->SetASCII("Style", style);
+        }
+    }
+    updateAllShortcuts();
+    priorityChanged("", 0);
+}
+
+void ShortcutManager::updateAllShortcuts()
+{
+    {
+        Base::StateLocker lock(busy);
         for (auto cmd : Application::Instance->commandManager().getAllCommands()) {
             if (cmd->getAction()) {
                 auto accel = cmd->getAccel();
                 if (!accel) {
                     accel = "";
                 }
-                cmd->setShortcut(getShortcut(nullptr, accel));
+                cmd->setShortcut(getShortcut(cmd->getName(), accel));
             }
         }
     }
     shortcutChanged("", QKeySequence());
-    priorityChanged("", 0);
+}
+
+std::vector<std::string> ShortcutManager::getStyles()
+{
+    std::vector<std::string> styles {defaultStyle};
+    std::vector<std::string> found;
+    for (const auto& dir : styleDirs()) {
+        std::error_code ec;
+        for (const auto& entry : fs::directory_iterator(dir, ec)) {
+            if (entry.path().extension() == ".txt") {
+                found.push_back(Base::FileInfo::pathToString(entry.path().stem()));
+            }
+        }
+    }
+    std::sort(found.begin(), found.end());
+    found.erase(std::unique(found.begin(), found.end()), found.end());
+    for (auto& name : found) {
+        if (name != defaultStyle) {
+            styles.push_back(std::move(name));
+        }
+    }
+    return styles;
+}
+
+std::string ShortcutManager::getStyle() const
+{
+    std::string style = hSetting->GetASCII("Style", defaultStyle);
+    return style.empty() ? defaultStyle : style;
+}
+
+void ShortcutManager::setStyle(const std::string& name)
+{
+    if (name.empty() || name == defaultStyle) {
+        hSetting->RemoveASCII("Style");
+    }
+    else {
+        hSetting->SetASCII("Style", name);
+    }
+}
+
+// A style file has one "command = shortcut" per line; an empty shortcut
+// removes the command's own, and lines starting with # are comments.
+void ShortcutManager::loadStyle()
+{
+    styleAccels.clear();
+    const std::string style = getStyle();
+    if (style == defaultStyle) {
+        return;
+    }
+    for (const auto& dir : styleDirs()) {
+        std::ifstream file(dir / Base::FileInfo::stringToPath(style + ".txt"));
+        if (!file) {
+            continue;
+        }
+        std::string line;
+        while (std::getline(file, line)) {
+            auto trim = [](std::string text) {
+                const auto first = text.find_first_not_of(" \t\r");
+                if (first == std::string::npos) {
+                    return std::string();
+                }
+                return text.substr(first, text.find_last_not_of(" \t\r") - first + 1);
+            };
+            line = trim(line);
+            const auto eq = line.find('=');
+            if (line.empty() || line[0] == '#' || eq == std::string::npos) {
+                continue;
+            }
+            styleAccels[trim(line.substr(0, eq))] = trim(line.substr(eq + 1));
+        }
+        return;
+    }
+    Base::Console().warning("Shortcut style '{}' not found\n", style);
+}
+
+const char* ShortcutManager::getStyleAccel(const char* cmdName) const
+{
+    if (!cmdName) {
+        return nullptr;
+    }
+    auto it = styleAccels.find(cmdName);
+    return it == styleAccels.end() ? nullptr : it->second.c_str();
+}
+
+QString ShortcutManager::getDefaultShortcut(const char* cmdName, const char* accel)
+{
+    if (auto styleAccel = getStyleAccel(cmdName)) {
+        accel = styleAccel;
+    }
+    else if (!accel) {
+        if (auto cmd = Application::Instance->commandManager().getCommandByName(cmdName)) {
+            accel = cmd->getAccel();
+        }
+    }
+    return QKeySequence(QString::fromLatin1(accel ? accel : "")).toString(QKeySequence::NativeText);
 }
 
 QString ShortcutManager::getShortcut(const char* cmdName, const char* accel)
@@ -177,6 +312,9 @@ QString ShortcutManager::getShortcut(const char* cmdName, const char* accel)
     }
     QString shortcut;
     if (cmdName) {
+        if (auto styleAccel = getStyleAccel(cmdName)) {
+            accel = styleAccel;
+        }
         shortcut = QString::fromLatin1(hShortcuts->GetASCII(cmdName, accel).c_str());
     }
     else {
@@ -193,7 +331,10 @@ void ShortcutManager::setShortcut(const char* cmdName, const char* accel)
             accel = "";
         }
         if (auto cmd = Application::Instance->commandManager().getCommandByName(cmdName)) {
-            auto defaultAccel = cmd->getAccel();
+            auto defaultAccel = getStyleAccel(cmdName);
+            if (!defaultAccel) {
+                defaultAccel = cmd->getAccel();
+            }
             if (!defaultAccel) {
                 defaultAccel = "";
             }

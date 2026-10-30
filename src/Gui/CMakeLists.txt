@@ -14,6 +14,7 @@ endif()
 add_subdirectory(Stylesheets)
 add_subdirectory(PreferencePacks)
 add_subdirectory(PreferencePackTemplates)
+add_subdirectory(ShortcutStyles)
 
 if(BUILD_WITH_CONDA)
     add_definitions(-DFC_CONDA)

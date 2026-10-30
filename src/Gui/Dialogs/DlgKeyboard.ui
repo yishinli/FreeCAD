@@ -66,6 +66,21 @@ treated as shortcut key sequence 'F, F'.</string>
         </property>
        </widget>
       </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelShortcutStyle">
+        <property name="text">
+         <string>Shortcut style</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="shortcutStyle">
+        <property name="toolTip">
+         <string>Set of default shortcuts, for example those of another CAD program.
+Shortcuts you assigned yourself are kept.</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

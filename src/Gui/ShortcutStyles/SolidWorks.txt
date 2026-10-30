@@ -1,0 +1,25 @@
+# Shortcut style close to SolidWorks (and SolidCraft's defaults).
+# One "command = shortcut" per line; an empty shortcut removes the command's own.
+# Commands not listed keep FreeCAD's shortcuts.
+
+# Standard views
+Std_ViewFront = Ctrl+1
+Std_ViewRear = Ctrl+2
+Std_ViewLeft = Ctrl+3
+Std_ViewRight = Ctrl+4
+Std_ViewTop = Ctrl+5
+Std_ViewBottom = Ctrl+6
+Std_ViewIsometric = Ctrl+7
+Std_AlignToSelection = Ctrl+8
+Std_ViewFitAll = F
+
+# Visibility
+Std_ToggleVisibility = V
+Std_IsolateSelection = Shift+I
+
+# Inspection
+Std_Measure = I
+Part_SectionAnalysis = Shift+S
+
+# Editing
+Std_Redo = Ctrl+Y

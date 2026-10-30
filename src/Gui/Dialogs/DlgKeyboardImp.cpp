@@ -112,15 +112,25 @@ void DlgCustomKeyboardImp::saveSettings()
 {
     // Note that shortcuts are currently saved as soon as modified
     ui->shortcutTimeout->onSave();
+    ShortcutManager::instance()->setStyle(ui->shortcutStyle->currentData().toString().toStdString());
 }
 
 void DlgCustomKeyboardImp::loadSettings()
 {
     ui->shortcutTimeout->onRestore();
+    ui->shortcutStyle->clear();
+    const std::string current = ShortcutManager::instance()->getStyle();
+    for (const auto& style : ShortcutManager::getStyles()) {
+        ui->shortcutStyle->addItem(QString::fromStdString(style), QString::fromStdString(style));
+        if (style == current) {
+            ui->shortcutStyle->setCurrentIndex(ui->shortcutStyle->count() - 1);
+        }
+    }
 }
 
 void DlgCustomKeyboardImp::resetSettingsToDefaults()
 {
+    ShortcutManager::instance()->setStyle(std::string());
     ShortcutManager::instance()->resetAll();
 }
 
@@ -215,9 +225,7 @@ void DlgCustomKeyboardImp::populateCommandList(
             item->setIcon(0, BitmapFactory().iconFromTheme(pixmap));
         }
         item->setText(2, cmd->getShortcut());
-        if (auto accel = cmd->getAccel()) {
-            item->setText(3, QKeySequence(QString::fromLatin1(accel)).toString());
-        }
+        item->setText(3, ShortcutManager::instance()->getDefaultShortcut(cmd->getName()));
 
         if (current == cmd->getName()) {
             currentItem = item;
@@ -468,7 +476,7 @@ void DlgCustomKeyboardImp::onCommandTreeWidgetCurrentItemChanged(QTreeWidgetItem
     Command* cmd = cCmdMgr.getCommandByName(name.constData());
     if (cmd) {
         QKeySequence ks = ShortcutManager::instance()->getShortcut(cmd->getName(), cmd->getAccel());
-        QKeySequence ks2 = QString::fromLatin1(cmd->getAccel());
+        QKeySequence ks2 = ShortcutManager::instance()->getDefaultShortcut(cmd->getName());
         QKeySequence ks3 = ui->editShortcut->text();
         if (ks.isEmpty()) {
             ui->currentShortcut->clear();

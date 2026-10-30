@@ -22,7 +22,10 @@
 
 #pragma once
 
+#include <map>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/hashed_index.hpp>
@@ -66,6 +69,19 @@ public:
      * @param defaultAccel: default shortcut
      */
     QString getShortcut(const char* cmd, const char* defaultAccel = nullptr);
+    /** Get the shortcut a command has when the user has not set one: the
+     * shortcut style's if it has one for the command, else the command's own.
+     */
+    QString getDefaultShortcut(const char* cmd, const char* defaultAccel = nullptr);
+
+    /** Shortcut styles: "FreeCAD", the commands' own shortcuts, then one per
+     * style file in ShortcutStyles of the user data or resource directory.
+     */
+    static std::vector<std::string> getStyles();
+    /// The active shortcut style
+    std::string getStyle() const;
+    /// Switch to a shortcut style; shortcuts the user set stay
+    void setStyle(const std::string& name);
 
     /// Return actions having a given shortcut in order of decreasing priority
     std::vector<std::pair<QByteArray, QAction*>> getActionsByShortcut(const QKeySequence& shortcut);
@@ -98,12 +114,16 @@ protected:
     bool eventFilter(QObject*, QEvent* ev) override;
     bool checkShortcut(QObject* o, const QKeySequence& key);
     void onTimer();
+    void loadStyle();
+    void updateAllShortcuts();
+    const char* getStyleAccel(const char* cmd) const;
 
 private:
     ParameterGrp::handle hShortcuts;
     ParameterGrp::handle hPriorities;
     ParameterGrp::handle hSetting;
     bool busy = false;
+    std::map<std::string, std::string> styleAccels;  //!< command name -> shortcut
 
     struct ActionKey
     {
