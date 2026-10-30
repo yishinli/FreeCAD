@@ -1406,9 +1406,9 @@ bool ViewProviderSectionAnalysis::pivotHint(Base::Vector3d& point)
     // Only while it is on or near the sources: a handle slid out into empty
     // space would otherwise have every later tilt swing the plane through nothing.
     if (pivot) {
-        Base::BoundBox3d near = sourceBBox;
-        near.Enlarge(0.1 * diagonal);
-        if (near.IsInBox(*pivot)) {
+        Base::BoundBox3d nearBox = sourceBBox;
+        nearBox.Enlarge(0.1 * diagonal);
+        if (nearBox.IsInBox(*pivot)) {
             point = *pivot;
             return true;
         }
