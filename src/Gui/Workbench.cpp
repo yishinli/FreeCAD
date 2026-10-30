@@ -652,7 +652,7 @@ void StdWorkbench::setupContextMenu(const char* recipient, MenuItem* item) const
               << "Std_ViewDockUndockFullscreen";
 
         if (!sels.empty()) {
-            *item << "Separator" << "Std_ToggleVisibility"
+            *item << "Separator" << "Std_ToggleVisibility" << "Std_IsolateSelection"
                   << "Std_ToggleSelectability" << "Std_TreeSelection"
                   << "Std_RandomColor" << "Std_ToggleTransparency" << "Separator" << "Std_Delete"
                   << "Std_SendToPythonConsole";
@@ -674,7 +674,7 @@ void StdWorkbench::setupContextMenu(const char* recipient, MenuItem* item) const
             }
             *item << "Std_ToggleFreeze" << "Separator"
                   << "Std_ToggleVisibility" << "Std_ShowSelection"
-                  << "Std_HideSelection"
+                  << "Std_HideSelection" << "Std_IsolateSelection"
                   << "Std_ToggleSelectability" << "Std_TreeSelectAllInstances" << "Separator"
                   << "Std_RandomColor" << "Std_ToggleTransparency" << "Separator"
                   << "Std_Cut" << "Std_Copy" << "Std_Paste" << "Std_Delete"
@@ -756,7 +756,7 @@ MenuItem* StdWorkbench::setupMenuBar() const
     auto visu = new MenuItem;
     visu->setCommand("V&isibility");
     *visu << "Std_ToggleVisibility" << "Std_ShowSelection" << "Std_HideSelection"
-          << "Std_SelectVisibleObjects"
+          << "Std_IsolateSelection" << "Std_SelectVisibleObjects"
           << "Separator" << "Std_ToggleObjects" << "Std_ShowObjects" << "Std_HideObjects"
           << "Separator" << "Std_ToggleSelectability";
 

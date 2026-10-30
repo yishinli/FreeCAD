@@ -20,7 +20,10 @@
  *                                                                         *
  ***************************************************************************/
 
+#include <algorithm>
 #include <cstddef>
+#include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -55,6 +58,7 @@
 #include <App/DocumentObserver.h>
 #include <App/GeoFeature.h>
 #include <App/GeoFeatureGroupExtension.h>
+#include <App/GroupExtension.h>
 #include <App/Part.h>
 #include <App/Link.h>
 #include <Base/Console.h>
@@ -1222,6 +1226,268 @@ bool StdCmdHideSelection::isActive()
 {
     return (Gui::Selection().size() != 0);
 }
+
+//===========================================================================
+// Std_IsolateSelection
+//===========================================================================
+namespace
+{
+// What one isolation hid, so that ending it shows exactly those again and
+// leaves alone what the user had hidden before.
+struct IsolatedItem
+{
+    App::DocumentObjectT object;
+    App::DocumentObjectT parent;  // set when hidden as an element of parent
+    std::string element;
+};
+
+std::map<std::string, std::vector<IsolatedItem>>& isolatedItems()
+{
+    static std::map<std::string, std::vector<IsolatedItem>> items;
+    return items;
+}
+
+// The container an object sits in: a folder, or else a part or body.
+App::DocumentObject* containerOf(const App::DocumentObject* obj)
+{
+    if (auto group = App::GroupExtension::getGroupOfObject(obj)) {
+        return group;
+    }
+    return App::GeoFeatureGroupExtension::getGroupOfObject(obj);
+}
+
+bool isChildVisible(App::DocumentObject* parent, const std::string& element, App::DocumentObject* child)
+{
+    if (parent) {
+        int vis = parent->isElementVisible(element.c_str());
+        if (vis >= 0) {
+            return vis > 0;
+        }
+    }
+    return child->Visibility.getValue();
+}
+
+void setChildVisible(
+    App::DocumentObject* parent,
+    const std::string& element,
+    App::DocumentObject* child,
+    bool visible
+)
+{
+    if (parent && parent->isElementVisible(element.c_str()) >= 0) {
+        parent->setElementVisible(element.c_str(), visible);
+    }
+    else {
+        child->Visibility.setValue(visible);
+    }
+}
+
+// Hide what is visible below 'obj' except the kept objects and the containers
+// leading to them; containers on such a path are opened instead of hidden.
+void hideOthers(
+    App::DocumentObject* parent,
+    const std::string& element,
+    App::DocumentObject* obj,
+    const std::set<App::DocumentObject*>& kept,
+    const std::set<App::DocumentObject*>& onPath,
+    std::vector<IsolatedItem>& hidden
+)
+{
+    if (!obj || kept.count(obj) || !isChildVisible(parent, element, obj)) {
+        return;
+    }
+    if (!onPath.count(obj)) {
+        setChildVisible(parent, element, obj, false);
+        hidden.push_back(
+            {App::DocumentObjectT(obj),
+             parent ? App::DocumentObjectT(parent) : App::DocumentObjectT(),
+             element}
+        );
+        return;
+    }
+    for (const auto& sub : obj->getSubObjects(App::DocumentObject::GS_SELECT)) {
+        App::DocumentObject* subParent = nullptr;
+        std::string childName;
+        App::DocumentObject* child = obj->resolve(sub.c_str(), &subParent, &childName);
+        if (child && subParent == obj) {
+            hideOthers(obj, childName, child, kept, onPath, hidden);
+        }
+    }
+}
+}  // namespace
+
+class StdCmdIsolateSelection: public Gui::Command
+{
+public:
+    StdCmdIsolateSelection()
+        : Command("Std_IsolateSelection")
+    {
+        sGroup = "Standard-View";
+        sMenuText = QT_TR_NOOP("&Isolate Selection");
+        sToolTipText = QT_TR_NOOP(
+            "Hides everything except the selected objects. Run it again to show what it hid"
+        );
+        sStatusTip = sToolTipText;
+        sWhatsThis = "Std_IsolateSelection";
+        eType = Alter3DView;
+
+        connDeleteDocument = App::GetApplication().signalDeleteDocument.connect(
+            [](const App::Document& doc) { isolatedItems().erase(doc.getName()); }
+        );
+    }
+    const char* className() const override
+    {
+        return "StdCmdIsolateSelection";
+    }
+
+protected:
+    void activated(int iMsg) override
+    {
+        Q_UNUSED(iMsg);
+        App::Document* doc = App::GetApplication().getActiveDocument();
+        if (!doc) {
+            return;
+        }
+        // Only what is shown changes, so an unmodified document stays unmodified.
+        Gui::Document* guiDoc = Application::Instance->getDocument(doc);
+        const bool wasModified = guiDoc && guiDoc->isModified();
+        auto it = isolatedItems().find(doc->getName());
+        if (it != isolatedItems().end()) {
+            restore(it->second);
+            isolatedItems().erase(it);
+        }
+        else {
+            isolate(doc);
+        }
+        if (guiDoc && !wasModified) {
+            guiDoc->setModified(false);
+        }
+    }
+
+    bool isActive() override
+    {
+        App::Document* doc = App::GetApplication().getActiveDocument();
+        const bool isolated = doc && isolatedItems().count(doc->getName()) > 0;
+        if (_pcAction) {
+            // Blocked: a toggle signal here would run the command again.
+            _pcAction->setBlockedChecked(isolated);
+        }
+        // Not under an open task: its transaction would take the visibility
+        // changes, and cancelling it would undo them behind the record's back.
+        if (Control().activeDialog()) {
+            return false;
+        }
+        return isolated || (doc && Selection().hasSelection(doc->getName()));
+    }
+
+    Action* createAction() override
+    {
+        Action* pcAction = Command::createAction();
+        pcAction->setCheckable(true);
+        return pcAction;
+    }
+
+private:
+    static void isolate(App::Document* doc)
+    {
+        std::set<App::DocumentObject*> kept;
+        std::set<App::DocumentObject*> onPath;
+        auto sels = Selection().getSelectionEx(
+            doc->getName(),
+            App::DocumentObject::getClassTypeId(),
+            ResolveMode::NoResolve
+        );
+        for (auto& sel : sels) {
+            App::DocumentObject* root = sel.getObject();
+            if (!root) {
+                continue;
+            }
+            std::vector<std::string> subs = sel.getSubNames();
+            if (subs.empty()) {
+                subs.emplace_back();
+            }
+            for (const auto& sub : subs) {
+                std::vector<App::DocumentObject*> path = root->getSubObjectList(sub.c_str());
+                if (path.empty()) {
+                    continue;
+                }
+                kept.insert(path.back());
+                onPath.insert(path.begin(), path.end() - 1);
+            }
+            // A selection given without its container path still keeps its containers.
+            for (auto group = containerOf(root); group; group = containerOf(group)) {
+                if (!onPath.insert(group).second) {
+                    break;
+                }
+            }
+        }
+        if (kept.empty()) {
+            return;
+        }
+        // A section analysis shows nothing without its sources, and hiding it
+        // would close them again: an isolated section keeps its sources, and
+        // then every section of a kept source is kept with it.
+        const Base::Type sectionType = Base::Type::fromName("Part::SectionAnalysis");
+        auto keepWithContainers = [&](App::DocumentObject* obj) {
+            kept.insert(obj);
+            for (auto group = containerOf(obj); group; group = containerOf(group)) {
+                onPath.insert(group);
+            }
+        };
+        if (!sectionType.isBad()) {
+            const std::set<App::DocumentObject*> selected = kept;
+            for (auto obj : selected) {
+                if (obj->isDerivedFrom(sectionType)) {
+                    for (auto source : obj->getOutList()) {
+                        keepWithContainers(source);
+                    }
+                }
+            }
+            std::vector<App::DocumentObject*> sections;
+            for (auto obj : doc->getObjectsOfType(sectionType)) {
+                const auto sources = obj->getOutList();
+                // Kept itself, or inside a kept container.
+                auto isKept = [&](App::DocumentObject* source) {
+                    for (auto o = source; o; o = containerOf(o)) {
+                        if (kept.count(o)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                if (std::any_of(sources.begin(), sources.end(), isKept)) {
+                    sections.push_back(obj);
+                }
+            }
+            for (auto obj : sections) {
+                keepWithContainers(obj);
+            }
+        }
+
+        std::vector<IsolatedItem> hidden;
+        for (auto obj : doc->getObjects()) {
+            if (!containerOf(obj)) {
+                hideOthers(nullptr, std::string(), obj, kept, onPath, hidden);
+            }
+        }
+        if (!hidden.empty()) {
+            isolatedItems()[doc->getName()] = std::move(hidden);
+        }
+    }
+
+    static void restore(const std::vector<IsolatedItem>& hidden)
+    {
+        for (auto item = hidden.rbegin(); item != hidden.rend(); ++item) {
+            App::DocumentObject* obj = item->object.getObject();
+            if (!obj) {
+                continue;
+            }
+            setChildVisible(item->parent.getObject(), item->element, obj, true);
+        }
+    }
+
+    fastsignals::scoped_connection connDeleteDocument;
+};
 
 //===========================================================================
 // Std_SelectVisibleObjects
@@ -4264,6 +4530,7 @@ void CreateViewStdCommands()
     rcCmdMgr.addCommand(new StdCmdToggleSelectability());
     rcCmdMgr.addCommand(new StdCmdShowSelection());
     rcCmdMgr.addCommand(new StdCmdHideSelection());
+    rcCmdMgr.addCommand(new StdCmdIsolateSelection());
     rcCmdMgr.addCommand(new StdCmdSelectVisibleObjects());
     rcCmdMgr.addCommand(new StdCmdToggleObjects());
     rcCmdMgr.addCommand(new StdCmdShowObjects());
