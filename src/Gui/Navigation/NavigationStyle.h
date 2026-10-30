@@ -599,6 +599,9 @@ protected:
 
 private:
     SbBool lockButton1 {false};
+    SbVec2s rightPressPos;   //!< where the right button went down
+    SbTime lastMiddleClick;  //!< release of the last plain middle click
+    std::shared_ptr<int> middleClicks {std::make_shared<int>(0)};  //!< counts them
 };
 
 class GuiExport MayaGestureNavigationStyle: public UserNavigationStyle

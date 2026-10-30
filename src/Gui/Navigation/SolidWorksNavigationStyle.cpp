@@ -21,8 +21,11 @@
  *                                                                         *
  ***************************************************************************/
 
+#include <cstdlib>
+
 #include <Inventor/nodes/SoCamera.h>
 #include <QApplication>
+#include <QTimer>
 
 #include "Navigation/NavigationStyle.h"
 #include "View3DInventorViewer.h"
@@ -50,7 +53,7 @@ const char* SolidWorksNavigationStyle::mouseButtons(ViewerMode mode)
         case NavigationStyle::PANNING:
             return QT_TR_NOOP("Press Ctrl and middle mouse button");
         case NavigationStyle::DRAGGING:
-            return QT_TR_NOOP("Press middle mouse button");
+            return QT_TR_NOOP("Press middle or right mouse button");
         case NavigationStyle::ZOOMING:
             return QT_TR_NOOP("Scroll mouse wheel");
         default:
@@ -149,6 +152,9 @@ SbBool SolidWorksNavigationStyle::processSoEvent(const SoEvent* const ev)
                 // If we are in edit mode then simply ignore the RMB events
                 // to pass the event to the base class.
                 this->lockrecenter = true;
+                if (press) {
+                    rightPressPos = pos;
+                }
 
                 // Don't show the context menu after dragging, panning or zooming
                 if (!press && (hasDragged || hasPanned || hasZoomed)) {
@@ -185,8 +191,28 @@ SbBool SolidWorksNavigationStyle::processSoEvent(const SoEvent* const ev)
                     float dci = (float)QApplication::doubleClickInterval() / 1000.0f;
                     // is it just a middle click?
                     if (tmp.getValue() < dci && !this->lockrecenter) {
-                        lookAtPoint(pos);
                         processed = true;
+                        // A second click goes home; a single one recenters once
+                        // it is clear no second click follows.
+                        const int clicks = ++*middleClicks;
+                        if (lastMiddleClick != SbTime::zero()
+                            && (ev->getTime() - lastMiddleClick).getValue() < dci) {
+                            lastMiddleClick = SbTime::zero();
+                            viewer->viewHome();
+                        }
+                        else {
+                            lastMiddleClick = ev->getTime();
+                            std::weak_ptr<int> pending = middleClicks;
+                            QTimer::singleShot(
+                                QApplication::doubleClickInterval(),
+                                [this, pending, clicks, pos]() {
+                                    auto current = pending.lock();
+                                    if (current && *current == clicks) {
+                                        lookAtPoint(pos);
+                                    }
+                                }
+                            );
+                        }
                     }
                 }
                 this->button3down = press;
@@ -203,6 +229,16 @@ SbBool SolidWorksNavigationStyle::processSoEvent(const SoEvent* const ev)
         if (this->currentmode == NavigationStyle::SELECTION && this->button1down) {
             triedSelectionDrag = true;
             processed = handleSelectionDragMotion(event, newmode, this->ctrldown);
+        }
+        // Dragging with the right button alone orbits; a plain right click
+        // still opens the context menu.
+        else if (this->button2down && !this->button1down && !this->button3down
+                 && this->currentmode == NavigationStyle::IDLE && !viewer->isEditing()
+                 && (std::abs(pos[0] - rightPressPos[0]) + std::abs(pos[1] - rightPressPos[1]))
+                     >= QApplication::startDragDistance()) {
+            saveCursorPosition(ev);
+            newmode = NavigationStyle::DRAGGING;
+            processed = true;
         }
         else if (this->currentmode == NavigationStyle::ZOOMING) {
             this->zoomByCursor(posn, prevnormalized);
