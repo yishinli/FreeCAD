@@ -27,11 +27,31 @@
 #include <QApplication>
 #include <QTimer>
 
+#include "Inventor/SoMouseWheelEvent.h"
+
+#include "Document.h"
 #include "Navigation/NavigationStyle.h"
 #include "View3DInventorViewer.h"
+#include "ViewProvider.h"
 
 
 using namespace Gui;
+
+namespace
+{
+// Edits that keep the right button to themselves, like the sketcher. A section
+// is edited while looking around it, so it orbits as usual.
+bool rightButtonTakenByEdit(View3DInventorViewer* viewer)
+{
+    if (!viewer->isEditing()) {
+        return false;
+    }
+    Gui::Document* doc = viewer->getDocument();
+    ViewProvider* vp = doc ? doc->getInEdit() : nullptr;
+    const Base::Type section = Base::Type::fromName("PartGui::ViewProviderSectionAnalysis");
+    return !vp || section.isBad() || !vp->isDerivedFrom(section);
+}
+}  // namespace
 
 // ----------------------------------------------------------------------------------
 
@@ -117,6 +137,10 @@ SbBool SolidWorksNavigationStyle::processSoEvent(const SoEvent* const ev)
         const int button = event->getButton();
         const SbBool press = event->getState() == SoButtonEvent::DOWN ? true : false;
 
+        // Any other button cancels a pending middle-click recenter
+        if (press && button != SoMouseButtonEvent::BUTTON3) {
+            ++*middleClicks;
+        }
         // SoDebugError::postInfo("processSoEvent", "button = %d", button);
         switch (button) {
             case SoMouseButtonEvent::BUTTON1:
@@ -222,6 +246,11 @@ SbBool SolidWorksNavigationStyle::processSoEvent(const SoEvent* const ev)
         }
     }
 
+    // Wheel zooming cancels a pending middle-click recenter
+    if (type.isDerivedFrom(SoMouseWheelEvent::getClassTypeId())) {
+        ++*middleClicks;
+    }
+
     // Mouse Movement handling
     if (type.isDerivedFrom(SoLocation2Event::getClassTypeId())) {
         this->lockrecenter = true;
@@ -233,7 +262,9 @@ SbBool SolidWorksNavigationStyle::processSoEvent(const SoEvent* const ev)
         // Dragging with the right button alone orbits; a plain right click
         // still opens the context menu.
         else if (this->button2down && !this->button1down && !this->button3down
-                 && this->currentmode == NavigationStyle::IDLE && !viewer->isEditing()
+                 && (this->currentmode == NavigationStyle::IDLE
+                     || this->currentmode == NavigationStyle::SPINNING)
+                 && !rightButtonTakenByEdit(viewer)
                  && (std::abs(pos[0] - rightPressPos[0]) + std::abs(pos[1] - rightPressPos[1]))
                      >= QApplication::startDragDistance()) {
             saveCursorPosition(ev);
