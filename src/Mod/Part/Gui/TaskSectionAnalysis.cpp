@@ -1034,7 +1034,10 @@ bool SectionAnalysisWidget::accept()
         Gui::cmdAppObjectArgs(feature, "PlaneOffset = %.12g", feature->PlaneOffset.getValue());
         Gui::cmdAppObjectArgs(feature, "FlipCut = %s", feature->FlipCut.getValue() ? "True" : "False");
 
-        Gui::Command::doCommand(Gui::Command::Doc, "App.ActiveDocument.recompute()");
+        // This section only. A file opened with objects still waiting for a
+        // recompute would otherwise have them rebuilt by pressing OK, which
+        // both changes the document and does real work on a file only viewed.
+        Gui::cmdAppObjectArgs(feature, "recompute()");
         if (!feature->isValid()) {
             throw Base::CADKernelError(feature->getStatusString());
         }

@@ -2535,6 +2535,12 @@ void CmdPartSectionAnalysis::activated(int iMsg)
         nz = (vz < 0) ? 1.0f : -1.0f;
     }
 
+    // Making a section is not a change to the document (see SectionAnalysis's
+    // NoModify status), but making its folder is an ordinary object as far as
+    // the document can tell when it is added. Put the flag back afterwards.
+    Gui::Document* guiDoc = getActiveGuiDocument();
+    const bool wasModified = guiDoc && guiDoc->isModified();
+
     // Standard command plumbing
     openCommand(QT_TRANSLATE_NOOP("Command", "Create Section Analysis"));
 
@@ -2548,6 +2554,7 @@ void CmdPartSectionAnalysis::activated(int iMsg)
     if (auto* existing
         = dynamic_cast<App::DocumentObjectGroup*>(getDocument()->getObject(sectionGroupName))) {
         groupName = existing->getNameInDocument();
+        Part::SectionAnalysis::markSectionsFolder(existing);
     }
     else {
         doCommand(
@@ -2560,6 +2567,7 @@ void CmdPartSectionAnalysis::activated(int iMsg)
         // to address it by, not the one that was asked for.
         if (auto* created = getDocument()->getActiveObject()) {
             groupName = created->getNameInDocument();
+            Part::SectionAnalysis::markSectionsFolder(created);
         }
     }
 
@@ -2616,7 +2624,11 @@ void CmdPartSectionAnalysis::activated(int iMsg)
 
     // Don't commitCommand() here - leave the transaction open.
     // The task panel's accept() commits it, reject()/Cancel aborts and removes the object.
-    updateActive();
+    //
+    // The section only, not the document: a file opened with objects still
+    // waiting for a recompute would have them rebuilt by making a section, a
+    // real change the flag put back below would then hide.
+    doCommand(Doc, "App.getDocument('%s').ActiveObject.recompute()", docName.c_str());
 
     // Give each new section a distinct default colour so successive sections
     // are easy to tell apart (pierreporte review feedback).
@@ -2644,6 +2656,10 @@ void CmdPartSectionAnalysis::activated(int iMsg)
 
     // Enter edit mode
     doCommand(Gui, "Gui.ActiveDocument.setEdit(App.ActiveDocument.ActiveObject.Name)");
+
+    if (guiDoc && !wasModified) {
+        guiDoc->setModified(false);
+    }
 }
 
 bool CmdPartSectionAnalysis::isActive()

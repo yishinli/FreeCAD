@@ -82,6 +82,9 @@ enum ObjectStatus
     RecomputeExtension = 19, ///< Whether the extensions of this object should be recomputed.
     TouchOnColorChange = 20, ///< Whether the object should be touched on color change.
     Freeze = 21, ///< Whether the object is frozen and is excluded from recomputation.
+    /// Whether adding, changing or removing the object leaves its document unmodified,
+    /// for objects that only change how the document is viewed.
+    NoModify = 22,
 };
 // clang-format on
 

@@ -44,6 +44,7 @@
 #include <App/Document.h>
 #include <App/DocumentObject.h>
 #include <App/DocumentObjectGroup.h>
+#include <App/GroupExtension.h>
 #include <App/Transactions.h>
 #include <App/ElementNamingUtils.h>
 #include <Base/Console.h>
@@ -75,6 +76,34 @@
 FC_LOG_LEVEL_INIT("Gui", true, true)
 
 using namespace Gui;
+
+namespace
+{
+/// Objects that only change how the document is viewed - a section analysis,
+/// and a folder holding nothing else - come and go and change without the
+/// document needing a save.
+///
+/// A folder stops being one the moment anything else is put in it: dropping a
+/// body into the sections folder changes only the folder's Group, and that is a
+/// real change to the document. The status is cleared then, for good, so taking
+/// the body out again counts as well. Seen here because the change to Group is
+/// reported after it is made.
+bool leavesDocumentUnmodified(const App::DocumentObject& obj)
+{
+    if (!obj.testStatus(App::NoModify)) {
+        return false;
+    }
+    if (const auto* group = obj.getExtensionByType<App::GroupExtension>(true)) {
+        for (const auto* member : group->Group.getValues()) {
+            if (member && !member->testStatus(App::NoModify)) {
+                const_cast<App::DocumentObject&>(obj).setStatus(App::NoModify, false);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+}  // namespace
 namespace sp = std::placeholders;
 
 namespace Gui
@@ -1027,7 +1056,9 @@ void Document::slotNewObject(const App::DocumentObject& Obj)
             }
         }
 
-        setModified(true);
+        if (!leavesDocumentUnmodified(Obj)) {
+            setModified(true);
+        }
         d->_ViewProviderMap[&Obj] = pcProvider;
         d->_CoinMap[pcProvider->getRoot()] = pcProvider;
         pcProvider->setStatus(Gui::ViewStatus::TouchDocument, d->_changeViewTouchDocument);
@@ -1083,7 +1114,9 @@ void Document::slotNewObject(const App::DocumentObject& Obj)
 
 void Document::slotDeletedObject(const App::DocumentObject& Obj)
 {
-    setModified(true);
+    if (!leavesDocumentUnmodified(Obj)) {
+        setModified(true);
+    }
 
     // cycling to all views of the document
     ViewProvider* viewProvider = getViewProvider(&Obj);
@@ -1174,7 +1207,7 @@ void Document::slotChangedObject(const App::DocumentObject& Obj, const App::Prop
     }
 
     // a property of an object has changed
-    if (!Prop.testStatus(App::Property::NoModify) && !isModified()) {
+    if (!Prop.testStatus(App::Property::NoModify) && !leavesDocumentUnmodified(Obj) && !isModified()) {
         FC_LOG(Prop.getFullName() << " modified");
         setModified(true);
     }
@@ -1305,7 +1338,7 @@ void Document::slotSkipRecompute(const App::Document& doc, const std::vector<App
 void Document::slotTouchedObject(const App::DocumentObject& Obj)
 {
     getMainWindow()->updateActions(true);
-    if (!isModified()) {
+    if (!isModified() && !leavesDocumentUnmodified(Obj)) {
         FC_LOG(Obj.getFullName() << " touched");
         setModified(true);
     }

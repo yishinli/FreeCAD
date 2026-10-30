@@ -49,6 +49,8 @@ class PartExport SectionAnalysis: public Part::Feature
 public:
     SectionAnalysis();
 
+    void onDocumentRestored() override;
+
     /// Objects to section. A container (App::Part, Body) is walked recursively,
     /// so listing several roots is only needed for objects that sit side by
     /// side at document level.
@@ -191,6 +193,11 @@ public:
     ///
     /// Rejects anything living in sections folder.
     static bool canBeSectioned(const App::DocumentObject* obj);
+
+    /// Let the folder the sections are kept in come and go and change without
+    /// the document needing a save, as the sections themselves do - only while
+    /// it holds nothing but sections, so a folder the user filled stays theirs.
+    static void markSectionsFolder(App::DocumentObject* folder);
 
     /// What to section when the user has selected nothing.
     ///

@@ -151,6 +151,35 @@ SectionAnalysis::SectionAnalysis()
     // Placement is not an input. Left editable it would slide the section faces
     // away from the plane actually being cut.
     Placement.setStatus(App::Property::ReadOnly, true);
+
+    // A section is a way of looking at the document, not part of it: making,
+    // moving or deleting one is no reason to ask for a save. Saving still
+    // writes it like any other object.
+    setStatus(App::NoModify, true);
+}
+
+void SectionAnalysis::onDocumentRestored()
+{
+    Part::Feature::onDocumentRestored();
+    // Object status is not saved, so the folder needs marking again.
+    markSectionsFolder(App::GroupExtension::getGroupOfObject(this));
+}
+
+void SectionAnalysis::markSectionsFolder(App::DocumentObject* folder)
+{
+    if (!folder) {
+        return;
+    }
+    const auto* group = folder->getExtensionByType<App::GroupExtension>(true);
+    if (!group) {
+        return;
+    }
+    for (const auto* member : group->Group.getValues()) {
+        if (!member || !member->isDerivedFrom(SectionAnalysis::getClassTypeId())) {
+            return;
+        }
+    }
+    folder->setStatus(App::NoModify, true);
 }
 
 void SectionAnalysis::handleChangedPropertyType(

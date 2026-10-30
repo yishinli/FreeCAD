@@ -276,7 +276,8 @@ void ViewProviderDocumentObject::onChanged(const App::Property* prop)
     }
 
     if (prop && !prop->testStatus(App::Property::NoModify) && pcDocument
-        && !pcDocument->isModified() && testStatus(Gui::ViewStatus::TouchDocument)) {
+        && !pcDocument->isModified() && testStatus(Gui::ViewStatus::TouchDocument)
+        && !(getObject() && getObject()->testStatus(App::NoModify))) {
         if (prop) {
             FC_LOG(prop->getFullName() << " changed");
         }
