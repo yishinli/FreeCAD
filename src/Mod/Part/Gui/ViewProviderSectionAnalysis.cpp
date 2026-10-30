@@ -1398,12 +1398,23 @@ bool ViewProviderSectionAnalysis::sourceBounds(Base::Vector3d& centre, double& d
 
 bool ViewProviderSectionAnalysis::pivotHint(Base::Vector3d& point)
 {
-    if (pivot) {
-        point = *pivot;
-        return true;
-    }
+    Base::Vector3d centre;
     double diagonal = 0.0;
-    return sourceBounds(point, diagonal);
+    if (!sourceBounds(centre, diagonal)) {
+        return false;
+    }
+    // Only while it is on or near the sources: a handle slid out into empty
+    // space would otherwise have every later tilt swing the plane through nothing.
+    if (pivot) {
+        Base::BoundBox3d near = sourceBBox;
+        near.Enlarge(0.1 * diagonal);
+        if (near.IsInBox(*pivot)) {
+            point = *pivot;
+            return true;
+        }
+    }
+    point = centre;
+    return true;
 }
 
 void ViewProviderSectionAnalysis::setPivot(const std::optional<Base::Vector3d>& point)
@@ -1914,6 +1925,8 @@ void ViewProviderSectionAnalysis::planeDragStart(void* data, SoDragger*)
     auto* self = static_cast<ViewProviderSectionAnalysis*>(data);
     self->planeDragging = true;
     self->syncPlaneDragger();
+    // In case the drag ends without a motion step that gets as far as setting it.
+    self->dragPoint = self->draggerBase.getPosition();
 }
 
 void ViewProviderSectionAnalysis::planeDragMotion(void* data, SoDragger*)
@@ -2078,6 +2091,14 @@ void ViewProviderSectionAnalysis::updateData(const App::Property* prop)
         }
         refreshSourceBBoxCache();
         updatePlaneVisual();
+        // A point picked on what was sectioned before says nothing about the new set.
+        if (prop == &feat->Source) {
+            pivot.reset();
+        }
+        // The handles stand on the sources' middle unless pinned, and that moved.
+        if (!planeDragging) {
+            syncPlaneDragger();
+        }
         // Not left to the Shape branch below. In Display mode execute() leaves
         // Shape null, so sectioning a different set of objects need not change
         // it at all - and then nothing would rebuild what is drawn.
