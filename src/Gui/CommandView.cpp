@@ -49,6 +49,7 @@
 #include <QPointer>
 #include <QSignalBlocker>
 #include <QTextStream>
+#include <QTimer>
 #include <QToolButton>
 
 #include <App/ComplexGeoDataPy.h>
@@ -1247,6 +1248,13 @@ std::map<std::string, std::vector<IsolatedItem>>& isolatedItems()
     return items;
 }
 
+// What a restore showed inside a still open transaction, kept until it closes.
+std::map<std::string, std::vector<IsolatedItem>>& restoredInTransaction()
+{
+    static std::map<std::string, std::vector<IsolatedItem>> items;
+    return items;
+}
+
 // The container an object sits in: a folder, or else a part or body.
 App::DocumentObject* containerOf(const App::DocumentObject* obj)
 {
@@ -1331,9 +1339,36 @@ public:
         sWhatsThis = "Std_IsolateSelection";
         eType = Alter3DView;
 
-        connDeleteDocument = App::GetApplication().signalDeleteDocument.connect(
-            [](const App::Document& doc) { isolatedItems().erase(doc.getName()); }
-        );
+        auto& app = App::GetApplication();
+        connDeleteDocument = app.signalDeleteDocument.connect([](const App::Document& doc) {
+            isolatedItems().erase(doc.getName());
+            restoredInTransaction().erase(doc.getName());
+        });
+        connCommitTransaction = app.signalCommitTransaction.connect([](const App::Document& doc) {
+            restoredInTransaction().erase(doc.getName());
+        });
+        // Cancelling a task rolls back its transaction, which hides again what a
+        // restore showed meanwhile. Show it again once the rollback is done.
+        connAbortTransaction = app.signalAbortTransaction.connect([](const App::Document& doc) {
+            auto it = restoredInTransaction().find(doc.getName());
+            if (it == restoredInTransaction().end()) {
+                return;
+            }
+            std::vector<IsolatedItem> shown = std::move(it->second);
+            restoredInTransaction().erase(it);
+            QTimer::singleShot(0, [docName = std::string(doc.getName()), shown]() {
+                App::Document* doc = App::GetApplication().getDocument(docName.c_str());
+                if (!doc) {
+                    return;
+                }
+                Gui::Document* guiDoc = Application::Instance->getDocument(doc);
+                const bool wasModified = guiDoc && guiDoc->isModified();
+                restore(shown);
+                if (guiDoc && !wasModified) {
+                    guiDoc->setModified(false);
+                }
+            });
+        });
     }
     const char* className() const override
     {
@@ -1354,6 +1389,10 @@ protected:
         auto it = isolatedItems().find(doc->getName());
         if (it != isolatedItems().end()) {
             restore(it->second);
+            if (doc->hasPendingTransaction()) {
+                auto& shown = restoredInTransaction()[doc->getName()];
+                shown.insert(shown.end(), it->second.begin(), it->second.end());
+            }
             isolatedItems().erase(it);
         }
         else {
@@ -1372,10 +1411,11 @@ protected:
             // Blocked: a toggle signal here would run the command again.
             _pcAction->setBlockedChecked(isolated);
         }
-        // Not under an open task: its transaction would take the visibility
-        // changes, and cancelling it would undo them behind the record's back.
+        // Only a restore under an open task: its transaction would take an
+        // isolate's changes, and cancelling it would undo them behind the
+        // record's back. A cancelled restore is shown again (see the constructor).
         if (Control().activeDialog()) {
-            return false;
+            return isolated;
         }
         return isolated || (doc && Selection().hasSelection(doc->getName()));
     }
@@ -1487,6 +1527,8 @@ private:
     }
 
     fastsignals::scoped_connection connDeleteDocument;
+    fastsignals::scoped_connection connCommitTransaction;
+    fastsignals::scoped_connection connAbortTransaction;
 };
 
 //===========================================================================
