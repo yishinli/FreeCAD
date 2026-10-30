@@ -683,7 +683,7 @@ void SectionAnalysisWidget::onAlignToggled(bool on)
                     alignButton->setChecked(false);
                 }
                 Gui::Selection().clearSelection();
-                alignTo(*plane);
+                alignTo(*plane, picked);
                 return;
             }
         }
@@ -755,13 +755,13 @@ void SectionAnalysisWidget::onSelectionChanged(const Gui::SelectionChanges& msg)
     // Not from inside the selection's own notification: the pick is still being
     // delivered to the other observers, and moving the plane recomputes.
     alignPending = true;
-    QTimer::singleShot(0, this, [this, plane = *plane]() {
+    QTimer::singleShot(0, this, [this, plane = *plane, picked]() {
         if (!alignPending) {
             return;  // disarmed by hand in the meantime
         }
         alignButton->setChecked(false);  // disarms, before the selection is cleared
         Gui::Selection().clearSelection();
-        alignTo(plane);
+        alignTo(plane, picked);
     });
 }
 
@@ -830,9 +830,18 @@ std::optional<Part::SectionAnalysis::ElementPlane> SectionAnalysisWidget::planeO
     return plane;
 }
 
-void SectionAnalysisWidget::alignTo(const Part::SectionAnalysis::ElementPlane& plane)
+void SectionAnalysisWidget::alignTo(
+    const Part::SectionAnalysis::ElementPlane& plane,
+    const std::optional<Base::Vector3d>& picked
+)
 {
     const PanelWrite writing(this);
+
+    // Before the plane moves, so the handles land on the pick and not on the
+    // middle of the sources first. A pick is on the face, so on the new plane.
+    if (viewProvider) {
+        viewProvider->setPivot(picked);
+    }
 
     // Stored as the element gives it, so PlaneNormal reads plainly: flipping
     // would turn it into the material.
@@ -875,6 +884,10 @@ void SectionAnalysisWidget::onPresetChanged(int index)
     }
 
     const Base::Vector3d normal = normalForPreset(preset);
+    // A preset starts over, through the middle of the sources: so do the handles.
+    if (viewProvider) {
+        viewProvider->setPivot(std::nullopt);
+    }
     resetTiltAngles();
     feature->PlaneNormal.setValue(normal);
     feature->AngleBase.setValue(normal);
@@ -947,11 +960,15 @@ void SectionAnalysisWidget::applyAngles()
         const Base::Vector3d unitOld = oldN / oldLen;
 
         Base::Vector3d hint = unitOld * oldD;
-        double diagonal = 0.0;
         if (viewProvider) {
-            viewProvider->sourceBounds(hint, diagonal);
+            viewProvider->pivotHint(hint);
         }
         pivot = Part::SectionAnalysis::draggerAnchor(unitOld, oldD, hint);
+        // Kept, so the handles stay on the point turned about rather than
+        // dropping the middle of the sources onto the tilted plane.
+        if (viewProvider) {
+            viewProvider->setPivot(pivot);
+        }
     }
     const double newOffset = pivot * n;
 

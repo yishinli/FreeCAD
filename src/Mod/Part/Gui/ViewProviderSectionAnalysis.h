@@ -23,6 +23,8 @@
 
 #include <vector>
 
+#include <optional>
+
 #include <fastsignals/signal.h>
 
 #include <Mod/Part/App/SectionCap.h>
@@ -198,6 +200,15 @@ public:
     /// from one box - computing it twice let them drift apart.
     bool sourceBounds(Base::Vector3d& centre, double& diagonal);
 
+    /// The point the handles sit on and the panel's tilts turn about, before it
+    /// is dropped onto the plane: where the user last put it - a pick to align
+    /// to, or the end of a slide - else the middle of the sources.
+    /// False if there is nothing to measure.
+    bool pivotHint(Base::Vector3d& point);
+
+    /// Pivot on `point` from now on; nullopt goes back to the middle of the sources.
+    void setPivot(const std::optional<Base::Vector3d>& point);
+
 protected:
     bool setEdit(int ModNum) override;
     void unsetEdit(int ModNum) override;
@@ -226,6 +237,9 @@ private:
     Gui::CoinPtr<Gui::SoTransformDragger> planeDragger;
     Base::Placement draggerBase;  //!< where the dragger sat when the drag began
     bool planeDragging = false;   //!< the dragger is moving the plane, write only
+    Base::Vector3d dragPoint;     //!< where the held handle is, on the plane, mid-drag
+    /// Set by the user, not saved: a picked point means nothing once the file is closed.
+    std::optional<Base::Vector3d> pivot;
 
     void installClipPlane();
     void removeClipPlane();

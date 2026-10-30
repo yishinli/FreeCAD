@@ -1396,6 +1396,24 @@ bool ViewProviderSectionAnalysis::sourceBounds(Base::Vector3d& centre, double& d
     return true;
 }
 
+bool ViewProviderSectionAnalysis::pivotHint(Base::Vector3d& point)
+{
+    if (pivot) {
+        point = *pivot;
+        return true;
+    }
+    double diagonal = 0.0;
+    return sourceBounds(point, diagonal);
+}
+
+void ViewProviderSectionAnalysis::setPivot(const std::optional<Base::Vector3d>& point)
+{
+    pivot = point;
+    if (!planeDragging) {
+        syncPlaneDragger();
+    }
+}
+
 Base::BoundBox3d ViewProviderSectionAnalysis::_getBoundingBox(
     const char* subname,
     const Base::Matrix4D* mat,
@@ -1825,8 +1843,7 @@ void ViewProviderSectionAnalysis::syncPlaneDragger()
     Base::Vector3d normal;
     double offset = 0.0;
     Base::Vector3d hint(0, 0, 0);
-    double diagonal = 0.0;
-    if (!feat->cutPlane(normal, offset) || !sourceBounds(hint, diagonal)) {
+    if (!feat->cutPlane(normal, offset) || !pivotHint(hint)) {
         return;
     }
 
@@ -1884,6 +1901,7 @@ void ViewProviderSectionAnalysis::applyPlaneDragger()
 
     const Base::Vector3d pivot = draggerBase.getPosition() + u * acrossU + v * acrossV;
     const Base::Vector3d onPlane = pivot + turned * along;
+    dragPoint = onPlane;
 
     // Undo FlipCut: the property holds the plane, not the side that survives.
     const Base::Vector3d publish = feat->FlipCut.getValue() ? -turned : turned;
@@ -1908,6 +1926,9 @@ void ViewProviderSectionAnalysis::planeDragFinish(void* data, SoDragger*)
     auto* self = static_cast<ViewProviderSectionAnalysis*>(data);
     self->applyPlaneDragger();
     self->planeDragging = false;
+    // Stay where let go: back in the middle, a handle slid out to a corner
+    // would leave the plane turning about a point nobody chose.
+    self->pivot = self->dragPoint;
     self->syncPlaneDragger();
 }
 

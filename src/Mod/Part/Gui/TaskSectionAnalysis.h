@@ -142,8 +142,12 @@ private:
         const std::optional<Base::Vector3d>& picked
     ) const;
 
-    /// Make `plane` the cutting plane, as no preset and without tilt.
-    void alignTo(const Part::SectionAnalysis::ElementPlane& plane);
+    /// Make `plane` the cutting plane, as no preset and without tilt, with the
+    /// handles on `picked` when the pick has a point.
+    void alignTo(
+        const Part::SectionAnalysis::ElementPlane& plane,
+        const std::optional<Base::Vector3d>& picked
+    );
 
     void onPresetChanged(int index);
     void onAngle1Changed(double val);
