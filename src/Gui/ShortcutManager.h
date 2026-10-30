@@ -72,7 +72,7 @@ public:
     /** Get the shortcut a command has when the user has not set one: the
      * shortcut style's if it has one for the command, else the command's own.
      */
-    QString getDefaultShortcut(const char* cmd, const char* defaultAccel = nullptr);
+    QKeySequence getDefaultShortcut(const char* cmd, const char* defaultAccel = nullptr);
 
     /** Shortcut styles: "FreeCAD", the commands' own shortcuts, then one per
      * style file in ShortcutStyles of the user data or resource directory.

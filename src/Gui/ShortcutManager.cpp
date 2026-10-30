@@ -21,6 +21,7 @@
  ****************************************************************************/
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -113,7 +114,8 @@ void ShortcutManager::OnChange(Base::Subject<const char*>& src, const char* reas
         if (boost::equals(reason, "ShortcutTimeout")) {
             timeout = hSetting->GetInt("ShortcutTimeout");
         }
-        else if (boost::equals(reason, "Style")) {
+        // resetAll() reloads the style itself once it has written it back
+        else if (boost::equals(reason, "Style") && !busy) {
             loadStyle();
             updateAllShortcuts();
         }
@@ -184,6 +186,7 @@ void ShortcutManager::resetAll()
             hSetting->SetASCII("Style", style);
         }
     }
+    loadStyle();
     updateAllShortcuts();
     priorityChanged("", 0);
 }
@@ -207,21 +210,29 @@ void ShortcutManager::updateAllShortcuts()
 
 std::vector<std::string> ShortcutManager::getStyles()
 {
-    std::vector<std::string> styles {defaultStyle};
-    std::vector<std::string> found;
+    // Names compare without case, as the files do on Windows; the user's
+    // spelling wins because its directory comes first.
+    auto lower = [](std::string text) {
+        std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return text;
+    };
+    std::map<std::string, std::string> found;
+    found[lower(defaultStyle)] = defaultStyle;
     for (const auto& dir : styleDirs()) {
         std::error_code ec;
         for (const auto& entry : fs::directory_iterator(dir, ec)) {
-            if (entry.path().extension() == ".txt") {
-                found.push_back(Base::FileInfo::pathToString(entry.path().stem()));
+            if (lower(Base::FileInfo::pathToString(entry.path().extension())) == ".txt") {
+                const std::string name = Base::FileInfo::pathToString(entry.path().stem());
+                found.emplace(lower(name), name);
             }
         }
     }
-    std::sort(found.begin(), found.end());
-    found.erase(std::unique(found.begin(), found.end()), found.end());
-    for (auto& name : found) {
-        if (name != defaultStyle) {
-            styles.push_back(std::move(name));
+    std::vector<std::string> styles {defaultStyle};
+    for (const auto& entry : found) {
+        if (entry.second != defaultStyle) {
+            styles.push_back(entry.second);
         }
     }
     return styles;
@@ -287,7 +298,7 @@ const char* ShortcutManager::getStyleAccel(const char* cmdName) const
     return it == styleAccels.end() ? nullptr : it->second.c_str();
 }
 
-QString ShortcutManager::getDefaultShortcut(const char* cmdName, const char* accel)
+QKeySequence ShortcutManager::getDefaultShortcut(const char* cmdName, const char* accel)
 {
     if (auto styleAccel = getStyleAccel(cmdName)) {
         accel = styleAccel;
@@ -297,7 +308,7 @@ QString ShortcutManager::getDefaultShortcut(const char* cmdName, const char* acc
             accel = cmd->getAccel();
         }
     }
-    return QKeySequence(QString::fromLatin1(accel ? accel : "")).toString(QKeySequence::NativeText);
+    return QKeySequence(QString::fromLatin1(accel ? accel : ""));
 }
 
 QString ShortcutManager::getShortcut(const char* cmdName, const char* accel)

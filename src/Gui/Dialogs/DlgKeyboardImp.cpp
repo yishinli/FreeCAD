@@ -225,7 +225,7 @@ void DlgCustomKeyboardImp::populateCommandList(
             item->setIcon(0, BitmapFactory().iconFromTheme(pixmap));
         }
         item->setText(2, cmd->getShortcut());
-        item->setText(3, ShortcutManager::instance()->getDefaultShortcut(cmd->getName()));
+        item->setText(3, ShortcutManager::instance()->getDefaultShortcut(cmd->getName()).toString());
 
         if (current == cmd->getName()) {
             currentItem = item;
