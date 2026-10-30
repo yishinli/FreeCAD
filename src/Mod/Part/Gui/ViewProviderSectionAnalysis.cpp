@@ -2159,6 +2159,14 @@ void ViewProviderSectionAnalysis::setupContextMenu(QMenu* menu, QObject* receive
     ViewProviderPart::setupContextMenu(menu, receiver, member);
 }
 
+// Undo brought a deleted section back. A recompute queued before the delete
+// found no object and left the flag set, which would block every later one.
+void ViewProviderSectionAnalysis::reattach(App::DocumentObject* pcFeat)
+{
+    ViewProviderPart::reattach(pcFeat);
+    recomputeQueued = false;
+}
+
 bool ViewProviderSectionAnalysis::onDelete(const std::vector<std::string>&)
 {
     removeClipPlane();

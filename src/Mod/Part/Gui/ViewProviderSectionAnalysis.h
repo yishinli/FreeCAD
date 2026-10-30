@@ -113,6 +113,7 @@ public:
     ~ViewProviderSectionAnalysis() override;
 
     void attach(App::DocumentObject* pcFeat) override;
+    void reattach(App::DocumentObject* pcFeat) override;
     void finishRestoring() override;
     void updateData(const App::Property* prop) override;
     void setEditViewer(Gui::View3DInventorViewer*, int ModNum) override;
