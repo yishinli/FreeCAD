@@ -24,7 +24,9 @@
  **************************************************************************/
 
 
+#include <array>
 #include <sstream>
+#include <utility>
 #include <QApplication>
 #include <Inventor/engines/SoCalculator.h>
 #include <Inventor/engines/SoConcatenate.h>
@@ -47,6 +49,7 @@
 #include <Inventor/nodes/SoCone.h>
 #include <Inventor/nodes/SoResetTransform.h>
 #include <Inventor/nodes/SoNodes.h>
+#include <Precision.hxx>
 
 
 #include <Gui/Inventor/MarkerBitmaps.h>
@@ -68,6 +71,17 @@
 using namespace Gui;
 using namespace MeasureGui;
 using namespace Measure;
+
+namespace
+{
+
+// Each delta dimension sits in a switch of its own, so that one can be hidden
+DimensionLinear* deltaDimension(SoSwitch* deltas, int index)
+{
+    return static_cast<DimensionLinear*>(static_cast<SoSwitch*>(deltas->getChild(index))->getChild(0));
+}
+
+}  // namespace
 
 PROPERTY_SOURCE(MeasureGui::ViewProviderMeasureDistance, MeasureGui::ViewProviderMeasureBase)
 
@@ -443,9 +457,12 @@ ViewProviderMeasureDistance::ViewProviderMeasureDistance()
     pDeltaDimensionSwitch->ref();
     pGlobalSeparator->addChild(pDeltaDimensionSwitch);
 
-    pDeltaDimensionSwitch->addChild(dimDeltaX);
-    pDeltaDimensionSwitch->addChild(dimDeltaY);
-    pDeltaDimensionSwitch->addChild(dimDeltaZ);
+    for (auto* dimension : {dimDeltaX, dimDeltaY, dimDeltaZ}) {
+        auto* show = new SoSwitch();
+        show->whichChild.setValue(SO_SWITCH_ALL);
+        show->addChild(dimension);
+        pDeltaDimensionSwitch->addChild(show);
+    }
 
     // This should already be touched in ViewProviderMeasureBase
     FontSize.touch();
@@ -485,24 +502,22 @@ void ViewProviderMeasureDistance::redrawAnnotation()
     auto propDistance = dynamic_cast<App::PropertyDistance*>(pcObject->getPropertyByName("Distance"));
     setLabelValue(propDistance->getQuantityValue().getUserString());
 
-    // Set delta distance
-    auto propDistanceX = static_cast<App::PropertyDistance*>(
-        getMeasureObject()->getPropertyByName("DistanceX")
-    );
-    static_cast<DimensionLinear*>(pDeltaDimensionSwitch->getChild(0))
-        ->text.setValue(("Δx: " + propDistanceX->getQuantityValue().getUserString()).c_str());
-
-    auto propDistanceY = static_cast<App::PropertyDistance*>(
-        getMeasureObject()->getPropertyByName("DistanceY")
-    );
-    static_cast<DimensionLinear*>(pDeltaDimensionSwitch->getChild(1))
-        ->text.setValue(("Δy: " + propDistanceY->getQuantityValue().getUserString()).c_str());
-
-    auto propDistanceZ = static_cast<App::PropertyDistance*>(
-        getMeasureObject()->getPropertyByName("DistanceZ")
-    );
-    static_cast<DimensionLinear*>(pDeltaDimensionSwitch->getChild(2))
-        ->text.setValue(("Δz: " + propDistanceZ->getQuantityValue().getUserString()).c_str());
+    // Set delta distance. A zero one has no length to draw, and its label would
+    // cover the next one's, so only the task panel shows it.
+    const std::array<std::pair<const char*, std::string>, 3> deltas {
+        {{"DistanceX", "Δx: "}, {"DistanceY", "Δy: "}, {"DistanceZ", "Δz: "}}
+    };
+    for (int i = 0; i < 3; ++i) {
+        auto prop = static_cast<App::PropertyDistance*>(
+            getMeasureObject()->getPropertyByName(deltas[i].first)
+        );
+        deltaDimension(pDeltaDimensionSwitch, i)
+            ->text.setValue((deltas[i].second + prop->getQuantityValue().getUserString()).c_str());
+        static_cast<SoSwitch*>(pDeltaDimensionSwitch->getChild(i))
+            ->whichChild.setValue(
+                prop->getValue() > Precision::Confusion() ? SO_SWITCH_ALL : SO_SWITCH_NONE
+            );
+    }
 
     // Set matrix
     SbMatrix matrix = getMatrix();
@@ -522,12 +537,10 @@ void ViewProviderMeasureDistance::onChanged(const App::Property* prop)
     }
     else if (prop == &TextBackgroundColor) {
         auto bColor = TextBackgroundColor.getValue();
-        static_cast<DimensionLinear*>(pDeltaDimensionSwitch->getChild(0))
-            ->backgroundColor.setValue(bColor.r, bColor.g, bColor.g);
-        static_cast<DimensionLinear*>(pDeltaDimensionSwitch->getChild(1))
-            ->backgroundColor.setValue(bColor.r, bColor.g, bColor.g);
-        static_cast<DimensionLinear*>(pDeltaDimensionSwitch->getChild(2))
-            ->backgroundColor.setValue(bColor.r, bColor.g, bColor.g);
+        for (int i = 0; i < 3; ++i) {
+            deltaDimension(pDeltaDimensionSwitch, i)
+                ->backgroundColor.setValue(bColor.r, bColor.g, bColor.b);
+        }
     }
 
     ViewProviderMeasureBase::onChanged(prop);
