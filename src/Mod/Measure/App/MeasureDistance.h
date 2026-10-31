@@ -106,6 +106,7 @@ public:
 
 private:
     bool distanceCircleCircle(const TopoDS_Shape& shape1, const TopoDS_Shape& shape2);
+    bool distanceCenterAxis(const TopoDS_Shape& shape1, const TopoDS_Shape& shape2);
     bool distancePlanePlane(
         const Handle(Geom_Plane) & plane1,
         const Handle(Geom_Plane) & plane2,
