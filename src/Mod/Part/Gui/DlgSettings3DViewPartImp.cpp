@@ -22,6 +22,8 @@
  *                                                                         *
  ***************************************************************************/
 
+#include <utility>
+
 #include <QMessageBox>
 
 
@@ -119,8 +121,23 @@ void DlgSettings3DViewPart::onMaxAngularDeflectionEditingFinished()
 
 void DlgSettings3DViewPart::saveSettings()
 {
+    // Apply saves every page, so leave documents alone unless these values changed:
+    // their objects may carry their own deviation
+    ParameterGrp::handle hPart = App::GetApplication().GetParameterGroupByPath(
+        "User parameter:BaseApp/Preferences/Mod/Part"
+    );
+    auto values = [&hPart]() {
+        return std::make_pair(
+            hPart->GetFloat("MeshDeviation", 0.2),
+            hPart->GetFloat("MeshAngularDeflection", 28.65)
+        );
+    };
+    const auto before = values();
     ui->maxDeviation->onSave();
     ui->maxAngularDeflection->onSave();
+    if (values() == before) {
+        return;
+    }
 
     // search for Part view providers and apply the new settings
     std::vector<App::Document*> docs = App::GetApplication().getDocuments();

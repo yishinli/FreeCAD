@@ -948,11 +948,13 @@ bool ViewProviderPartExt::loadParameter()
     float angularDeflection = hGrp->GetFloat("MeshAngularDeflection", 28.65);
     NormalsFromUV = hGrp->GetBool("NormalsFromUVNodes", NormalsFromUV);
 
-    if (Deviation.getValue() != deviation) {
+    // The properties keep the float of the parameter, but a document saves them
+    // with fewer digits, so compare in float precision
+    if (static_cast<float>(Deviation.getValue()) != deviation) {
         Deviation.setValue(deviation);
         changed = true;
     }
-    if (AngularDeflection.getValue() != angularDeflection) {
+    if (static_cast<float>(AngularDeflection.getValue()) != angularDeflection) {
         AngularDeflection.setValue(angularDeflection);
     }
 
