@@ -23,3 +23,7 @@ Part_SectionAnalysis = Shift+S
 
 # Editing
 Std_Redo = Ctrl+Y
+
+# Commands of the company FusionStyle macro (tools: freecad/fusion-style). The macro reads
+# their keys from this file once it has run; until then FreeCAD has no such commands.
+FusionStyle_Measure = Shift+M
