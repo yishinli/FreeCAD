@@ -22,6 +22,8 @@
  **************************************************************************/
 
 
+#include <numbers>
+
 #include <App/PropertyContainer.h>
 #include <App/Application.h>
 #include <App/Document.h>
@@ -29,6 +31,10 @@
 #include <Mod/Part/App/Datums.h>
 #include <Base/Tools.h>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <BRepAdaptor_CompCurve.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <gp_Circ.hxx>
@@ -217,6 +223,138 @@ bool MeasureDistance::distanceCircleCircle(const TopoDS_Shape& shape1, const Top
     }
 
     return false;
+}
+
+namespace
+{
+
+// What a picked element offers to a center or axis distance
+struct CenterFeature
+{
+    enum class Kind
+    {
+        None,
+        Point,
+        Line,
+        Plane
+    };
+    Kind kind = Kind::None;
+    gp_Pnt point;        // the point, or a point on the line or plane
+    gp_Dir dir;          // direction of the line, normal of the plane
+    bool round = false;  // the center of a circle or the axis of a cylinder
+};
+
+CenterFeature centerFeature(const TopoDS_Shape& shape)
+{
+    using Kind = CenterFeature::Kind;
+    CenterFeature feature;
+    if (shape.IsNull()) {
+        return feature;
+    }
+    if (shape.ShapeType() == TopAbs_VERTEX) {
+        feature.kind = Kind::Point;
+        feature.point = BRep_Tool::Pnt(TopoDS::Vertex(shape));
+    }
+    else if (shape.ShapeType() == TopAbs_EDGE) {
+        BRepAdaptor_Curve curve(TopoDS::Edge(shape));
+        if (curve.GetType() == GeomAbs_Circle) {
+            feature.kind = Kind::Point;
+            feature.point = curve.Circle().Location();
+            feature.round = true;
+        }
+        else if (curve.GetType() == GeomAbs_Line) {
+            feature.kind = Kind::Line;
+            feature.point = curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2);
+            feature.dir = curve.Line().Direction();
+        }
+    }
+    else if (shape.ShapeType() == TopAbs_FACE) {
+        BRepAdaptor_Surface surface(TopoDS::Face(shape));
+        GProp_GProps props;
+        // Holes, bosses and half holes, but not fillets: the axis of a fillet is
+        // outside the part, and picking one means its material
+        const double span = surface.LastUParameter() - surface.FirstUParameter();
+        if (surface.GetType() == GeomAbs_Cylinder && span >= std::numbers::pi - 1e-6) {
+            // The point of the axis level with the middle of the face
+            BRepGProp::SurfaceProperties(shape, props);
+            const gp_Lin axis(surface.Cylinder().Axis());
+            feature.kind = Kind::Line;
+            feature.point = ElCLib::Value(ElCLib::Parameter(axis, props.CentreOfMass()), axis);
+            feature.dir = axis.Direction();
+            feature.round = true;
+        }
+        else if (surface.GetType() == GeomAbs_Plane) {
+            BRepGProp::SurfaceProperties(shape, props);
+            feature.kind = Kind::Plane;
+            feature.point = props.CentreOfMass();
+            feature.dir = surface.Plane().Axis().Direction();
+        }
+    }
+    return feature;
+}
+
+// The foot of point on the line or plane of feature
+gp_Pnt centerFoot(const gp_Pnt& point, const CenterFeature& feature)
+{
+    const gp_Vec offset(feature.point, point);
+    const gp_Vec dir(feature.dir);
+    if (feature.kind == CenterFeature::Kind::Line) {
+        return feature.point.Translated(dir * offset.Dot(dir));
+    }
+    return point.Translated(-dir * offset.Dot(dir));
+}
+
+// Points p1 on first and p2 on second whose distance is the center or axis
+// distance; false where there is no single such distance
+bool centerPoints(const CenterFeature& first, const CenterFeature& second, gp_Pnt& p1, gp_Pnt& p2)
+{
+    using Kind = CenterFeature::Kind;
+    if (first.kind > second.kind) {
+        return centerPoints(second, first, p2, p1);
+    }
+    if (first.kind == Kind::Point) {
+        p1 = first.point;
+        p2 = second.kind == Kind::Point ? second.point : centerFoot(first.point, second);
+        return true;
+    }
+    if (first.kind == Kind::Line) {
+        // Parallel to the other line or plane, else the distance depends on where.
+        // Imported or rotated parts are off by far more than Precision::Angular(),
+        // and failing here quietly gives the wall distance instead.
+        constexpr double parallelTolerance = 1e-6;  // rad, 0.2 um over 200 mm
+        const bool parallel = second.kind == Kind::Line
+            ? first.dir.IsParallel(second.dir, parallelTolerance)
+            : first.dir.IsNormal(second.dir, parallelTolerance);
+        if (!parallel) {
+            return false;
+        }
+        p1 = first.point;
+        p2 = centerFoot(first.point, second);
+        return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+bool MeasureDistance::distanceCenterAxis(const TopoDS_Shape& shape1, const TopoDS_Shape& shape2)
+{
+    // A circle or cylinder is measured from its center or axis, as for holes
+    const CenterFeature first = centerFeature(shape1);
+    const CenterFeature second = centerFeature(shape2);
+    if (!first.round && !second.round) {
+        return false;
+    }
+    if (first.kind == CenterFeature::Kind::None || second.kind == CenterFeature::Kind::None) {
+        return false;
+    }
+    gp_Pnt p1;
+    gp_Pnt p2;
+    if (!centerPoints(first, second, p1, p2)) {
+        return false;
+    }
+    setValues(p1, p2);
+    return true;
 }
 
 bool MeasureDistance::distancePlanePlane(
@@ -423,6 +561,10 @@ App::DocumentObjectExecReturn* MeasureDistance::execute()
     }
 
     if (distanceInfiniteInfinite(*ob1, subs1, *ob2, subs2, shape1, shape2)) {
+        return DocumentObject::StdReturn;
+    }
+
+    if (distanceCenterAxis(shape1, shape2)) {
         return DocumentObject::StdReturn;
     }
 

@@ -12,9 +12,13 @@
 #include <Base/Rotation.h>
 #include <Base/Vector3D.h>
 #include <gtest/gtest.h>
+#include <cmath>
+#include <numbers>
 #include <BRep_Builder.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Trsf.hxx>
@@ -45,6 +49,19 @@ protected:
     App::Document* getDocument() const
     {
         return document;
+    }
+
+    // The side face of a cylinder only, so that it is Face1
+    Part::Feature* addCylinderFace(const char* name, const gp_Ax2& axis, double radius) const
+    {
+        auto feature = document->addObject<Part::Feature>(name);
+        feature->Shape.setValue(BRepPrimAPI_MakeCylinder(axis, radius, 10.0).Cylinder().LateralFace());
+        return feature;
+    }
+
+    Part::Feature* addCylinderZ(const char* name, double x, double radius) const
+    {
+        return addCylinderFace(name, gp_Ax2(gp_Pnt(x, 0.0, 0.0), gp::DZ()), radius);
     }
 
     TopoDS_Edge makeCircle(const gp_Pnt& pnt) const
@@ -209,5 +226,163 @@ TEST_F(MeasureDistance, testLinkedCompoundKeepsInternalLocation)
     EXPECT_DOUBLE_EQ(md->Distance.getValue(), 20.0);
     EXPECT_EQ(md->Position1.getValue(), Base::Vector3d(100.0, 0.0, 20.0));
     EXPECT_EQ(md->Position2.getValue(), Base::Vector3d(100.0, 0.0, 0.0));
+}
+
+TEST_F(MeasureDistance, testCylinderCylinderAxis)
+{
+    // Two holes measure between their axes, not between their walls
+    App::Document* doc = getDocument();
+    auto c1 = addCylinderZ("Cylinder1", 0.0, 2.0);
+    auto c2 = addCylinderZ("Cylinder2", 10.0, 3.0);
+
+    auto md = doc->addObject<Measure::MeasureDistance>("Distance");
+    md->Element1.setValue(c1, {"Face1"});
+    md->Element2.setValue(c2, {"Face1"});
+
+    doc->recompute();
+
+    EXPECT_NEAR(md->Distance.getValue(), 10.0, 1e-9);
+    EXPECT_NEAR(md->DistanceX.getValue(), 10.0, 1e-9);
+    EXPECT_NEAR(md->DistanceZ.getValue(), 0.0, 1e-9);
+    EXPECT_NEAR(md->Position1.getValue().z, 5.0, 1e-9);
+}
+
+TEST_F(MeasureDistance, testCylindersNearlyParallelAxis)
+{
+    // Axes off by far more than Precision::Angular(), as in imported or rotated parts
+    App::Document* doc = getDocument();
+    auto c1 = addCylinderZ("Cylinder1", 0.0, 2.0);
+    const double tilt = 1e-9;
+    auto c2 = addCylinderFace(
+        "Cylinder2",
+        gp_Ax2(gp_Pnt(10.0, 0.0, 0.0), gp_Dir(std::sin(tilt), 0.0, std::cos(tilt))),
+        3.0
+    );
+
+    auto md = doc->addObject<Measure::MeasureDistance>("Distance");
+    md->Element1.setValue(c1, {"Face1"});
+    md->Element2.setValue(c2, {"Face1"});
+
+    doc->recompute();
+
+    EXPECT_NEAR(md->Distance.getValue(), 10.0, 1e-6);
+}
+
+TEST_F(MeasureDistance, testFilletIsNotRound)
+{
+    // A quarter cylinder, as a fillet: measured to its material, not its axis
+    App::Document* doc = getDocument();
+    auto fillet = doc->addObject<Part::Feature>("Fillet");
+    fillet->Shape.setValue(
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(), gp::DZ()), 2.0, 10.0, std::numbers::pi / 2)
+            .Cylinder()
+            .LateralFace()
+    );
+    auto half = doc->addObject<Part::Feature>("Half");
+    half->Shape.setValue(
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(10.0, 0.0, 0.0), gp::DZ()), 3.0, 10.0, std::numbers::pi)
+            .Cylinder()
+            .LateralFace()
+    );
+    auto box = doc->addObject<Part::Feature>("Box");
+    box->Shape.setValue(BRepPrimAPI_MakeBox(gp_Pnt(20.0, -5.0, 0.0), 10.0, 10.0, 10.0).Solid());
+
+    auto md = doc->addObject<Measure::MeasureDistance>("Distance");
+    md->Element1.setValue(fillet, {"Face1"});
+    md->Element2.setValue(box, {"Face1"});
+    auto halfToBox = doc->addObject<Measure::MeasureDistance>("HalfToBox");
+    halfToBox->Element1.setValue(half, {"Face1"});
+    halfToBox->Element2.setValue(box, {"Face1"});
+
+    doc->recompute();
+
+    EXPECT_NEAR(md->Distance.getValue(), 18.0, 1e-6);         // from the fillet surface at x = 2
+    EXPECT_NEAR(halfToBox->Distance.getValue(), 10.0, 1e-9);  // a half hole is still round
+}
+
+TEST_F(MeasureDistance, testCircleCylinderAxis)
+{
+    App::Document* doc = getDocument();
+    auto circle = doc->addObject<Part::Feature>("Circle");
+    circle->Shape.setValue(makeCircle(gp_Pnt(3.0, 4.0, 2.0)));
+    auto cylinder = addCylinderZ("Cylinder", 0.0, 1.5);
+
+    auto md = doc->addObject<Measure::MeasureDistance>("Distance");
+    md->Element1.setValue(circle, {"Edge1"});
+    md->Element2.setValue(cylinder, {"Face1"});
+
+    doc->recompute();
+
+    EXPECT_NEAR(md->Distance.getValue(), 5.0, 1e-9);
+    EXPECT_EQ(md->Position1.getValue(), Base::Vector3d(3.0, 4.0, 2.0));
+    EXPECT_TRUE(md->Position2.getValue().IsEqual(Base::Vector3d(0.0, 0.0, 2.0), 1e-9));
+}
+
+TEST_F(MeasureDistance, testCylinderPlaneAxis)
+{
+    // A hole to a face parallel to its axis: the axis to the face
+    App::Document* doc = getDocument();
+    auto cylinder = addCylinderZ("Cylinder", 0.0, 2.0);
+    auto box = doc->addObject<Part::Feature>("Box");
+    box->Shape.setValue(BRepPrimAPI_MakeBox(gp_Pnt(20.0, -5.0, 0.0), 10.0, 10.0, 10.0).Solid());
+
+    auto md = doc->addObject<Measure::MeasureDistance>("Distance");
+    md->Element1.setValue(cylinder, {"Face1"});
+    md->Element2.setValue(box, {"Face1"});  // the face at x = 20
+
+    doc->recompute();
+
+    EXPECT_NEAR(md->Distance.getValue(), 20.0, 1e-9);
+    EXPECT_NEAR(md->DistanceX.getValue(), 20.0, 1e-9);
+}
+
+TEST_F(MeasureDistance, testVertexCylinderAxis)
+{
+    App::Document* doc = getDocument();
+    auto vertex = doc->addObject<Part::Feature>("Vertex");
+    vertex->Shape.setValue(BRepBuilderAPI_MakeVertex(gp_Pnt(5.0, 0.0, 3.0)).Vertex());
+    auto cylinder = addCylinderZ("Cylinder", 0.0, 2.0);
+
+    auto md = doc->addObject<Measure::MeasureDistance>("Distance");
+    md->Element1.setValue(cylinder, {"Face1"});
+    md->Element2.setValue(vertex, {"Vertex1"});
+
+    doc->recompute();
+
+    EXPECT_NEAR(md->Distance.getValue(), 5.0, 1e-9);
+    EXPECT_TRUE(md->Position1.getValue().IsEqual(Base::Vector3d(0.0, 0.0, 3.0), 1e-9));
+    EXPECT_EQ(md->Position2.getValue(), Base::Vector3d(5.0, 0.0, 3.0));
+}
+
+TEST_F(MeasureDistance, testCylindersNotParallelUseMinimum)
+{
+    // Axes at an angle have no single axis distance: the closest walls are measured
+    App::Document* doc = getDocument();
+    auto c1 = addCylinderZ("Cylinder1", 0.0, 2.0);
+    auto c2 = addCylinderFace("Cylinder2", gp_Ax2(gp_Pnt(-5.0, 0.0, 20.0), gp::DX()), 1.0);
+
+    auto md = doc->addObject<Measure::MeasureDistance>("Distance");
+    md->Element1.setValue(c1, {"Face1"});
+    md->Element2.setValue(c2, {"Face1"});
+
+    doc->recompute();
+
+    EXPECT_NEAR(md->Distance.getValue(), 9.0, 1e-6);
+}
+
+TEST_F(MeasureDistance, testPlanePlaneUnchanged)
+{
+    // Elements that are not round keep the minimum distance
+    App::Document* doc = getDocument();
+    auto box = doc->addObject<Part::Feature>("Box");
+    box->Shape.setValue(BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Solid());
+
+    auto md = doc->addObject<Measure::MeasureDistance>("Distance");
+    md->Element1.setValue(box, {"Face1"});
+    md->Element2.setValue(box, {"Face2"});
+
+    doc->recompute();
+
+    EXPECT_NEAR(md->Distance.getValue(), 10.0, 1e-9);
 }
 // NOLINTEND
