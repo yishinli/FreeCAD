@@ -98,6 +98,9 @@ private:
 
     // Forgets the custom coordinate system when it is deleted (undo, Python, temporary objects)
     fastsignals::scoped_connection connectDeletedObject;
+    // Documents saved while they held the preview: removing it changes them again
+    fastsignals::scoped_connection connectFinishSave;
+    std::vector<std::string> previewSavedIn;
 };
 
 }  // namespace MassPropertiesGui

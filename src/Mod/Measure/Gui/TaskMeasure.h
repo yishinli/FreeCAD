@@ -103,6 +103,9 @@ private:
     std::unique_ptr<TaskMeasureTypeInfo> typeInfo;
 
     fastsignals::connection m_deletedConnection;
+    fastsignals::scoped_connection m_savedConnection;
+    // The preview went into a saved file, so removing it changes the document again
+    bool m_previewSaved = false;
 
     void removeObject();
     void onModeChanged(int index);

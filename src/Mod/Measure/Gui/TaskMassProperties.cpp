@@ -282,6 +282,14 @@ TaskMassProperties::TaskMassProperties()
         }
     );
 
+    connectFinishSave = App::GetApplication().signalFinishSaveDocument.connect(
+        [this](const App::Document& doc, const std::string&) {
+            if (doc.getObject("MassPropertiesPreview")) {
+                previewSavedIn.emplace_back(doc.getName());
+            }
+        }
+    );
+
     qApp->installEventFilter(this);
 
     if (auto* app = Gui::Application::Instance) {
@@ -505,6 +513,11 @@ void TaskMassProperties::removeTemporaryObjects()
     }
 
     doc->removeObject("MassPropertiesPreview");
+    if (std::erase(previewSavedIn, std::string(doc->getName())) > 0) {
+        if (auto* guiDoc = Gui::Application::Instance->getDocument(doc)) {
+            guiDoc->setModified(true);
+        }
+    }
 }
 
 
@@ -1307,7 +1320,15 @@ void TaskMassProperties::tryUpdate()
 
             App::DocumentObject* obj = doc->getObject("MassPropertiesPreview");
             if (!obj) {
+                // The preview only shows the result: it is no reason to ask for a save,
+                // and a document opened only to look at stays unmodified
+                auto* guiDoc = Gui::Application::Instance->getDocument(doc);
+                const bool wasModified = guiDoc && guiDoc->isModified();
                 obj = doc->addObject("Measure::Result", "MassPropertiesPreview");
+                obj->setStatus(App::NoModify, true);
+                if (guiDoc && !wasModified) {
+                    guiDoc->setModified(false);
+                }
             }
 
             obj->Visibility.setValue(true);

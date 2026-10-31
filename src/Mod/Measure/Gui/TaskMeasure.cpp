@@ -38,6 +38,7 @@
 #include <Gui/Application.h>
 #include <Gui/BitmapFactory.h>
 #include <Gui/Control.h>
+#include <Gui/Document.h>
 #include <Gui/ViewProvider.h>
 #include <Gui/InputHint.h>
 
@@ -237,6 +238,13 @@ TaskMeasure::TaskMeasure()
             onObjectDeleted(obj);
         });
     }
+    m_savedConnection = App::GetApplication().signalFinishSaveDocument.connect(
+        [this](const App::Document& doc, const std::string&) {
+            if (_mMeasureObject && _mMeasureObject->getDocument() == &doc) {
+                m_previewSaved = true;
+            }
+        }
+    );
 
     if (auto* doc = Gui::Application::Instance->activeDocument()) {
         mTargetDoc = doc;
@@ -294,6 +302,11 @@ void TaskMeasure::createObject(const App::MeasureType* measureType)
         return;
     }
 
+    // Until it is saved, the measurement only shows a result: it is no reason to ask
+    // for a save, and a document opened only to look at stays unmodified
+    Gui::Document* guiDoc = Gui::Application::Instance->getDocument(doc);
+    const bool wasModified = guiDoc && guiDoc->isModified();
+
     if (measureType->isPython) {
         Base::PyGILStateLocker lock;
         auto pyMeasureClass = measureType->pythonClass;
@@ -317,6 +330,13 @@ void TaskMeasure::createObject(const App::MeasureType* measureType)
         _mMeasureObject = dynamic_cast<Measure::MeasureBase*>(
             doc->addObject(measureType->measureObject.c_str(), measureType->label.c_str())
         );
+    }
+
+    if (_mMeasureObject) {
+        _mMeasureObject->setStatus(App::NoModify, true);
+    }
+    if (guiDoc && !wasModified) {
+        guiDoc->setModified(false);
     }
 }
 
@@ -546,6 +566,13 @@ bool TaskMeasure::apply()
 
 bool TaskMeasure::apply(bool reset)
 {
+    if (_mMeasureObject) {
+        _mMeasureObject->setStatus(App::NoModify, false);
+        m_previewSaved = false;
+        if (auto* guiDoc = Gui::Application::Instance->getDocument(_mMeasureObject->getDocument())) {
+            guiDoc->setModified(true);
+        }
+    }
     ensureGroup(_mMeasureObject);
     _mMeasureObject = nullptr;
     if (reset) {
@@ -609,8 +636,15 @@ void TaskMeasure::removeObject()
         return;
     }
 
-    _mMeasureObject->getDocument()->removeObject(_mMeasureObject->getNameInDocument());
+    App::Document* doc = _mMeasureObject->getDocument();
+    doc->removeObject(_mMeasureObject->getNameInDocument());
     _mMeasureObject = nullptr;
+    if (m_previewSaved) {
+        m_previewSaved = false;
+        if (auto* guiDoc = Gui::Application::Instance->getDocument(doc)) {
+            guiDoc->setModified(true);
+        }
+    }
 }
 
 bool TaskMeasure::hasSelection()
@@ -688,6 +722,13 @@ void TaskMeasure::onObjectDeleted(const App::DocumentObject& obj)
 {
     if (&obj == _mMeasureObject) {
         _mMeasureObject = nullptr;
+        // Deleted by undo, Python or the tree after a save that wrote it
+        if (m_previewSaved) {
+            m_previewSaved = false;
+            if (auto* guiDoc = Gui::Application::Instance->getDocument(obj.getDocument())) {
+                guiDoc->setModified(true);
+            }
+        }
     }
 }
 
