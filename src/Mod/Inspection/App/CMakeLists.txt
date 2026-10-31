@@ -13,6 +13,8 @@ SET(Inspection_SRCS
     AppInspection.cpp
     InspectionFeature.cpp
     InspectionFeature.h
+    Interference.cpp
+    Interference.h
     PreCompiled.h
 )
 
