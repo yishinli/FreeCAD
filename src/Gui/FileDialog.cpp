@@ -20,6 +20,7 @@
  ******************************************************************************/
 
 
+#include <filesystem>
 #include <memory>
 
 #include <FCConfig.h>
@@ -42,6 +43,7 @@
 #include <QGroupBox>
 #include <QLineEdit>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
@@ -51,6 +53,7 @@
 #include <QStyle>
 #include <QUrl>
 
+#include <Base/FileInfo.h>
 #include <Base/Parameter.h>
 #include <App/Application.h>
 #include <App/Document.h>
@@ -661,8 +664,40 @@ QString FileDialog::getSaveFileName(
         file = pristineUserInput;
     }
 
+    if (refuseReadOnlyTarget(parent, file)) {
+        return {};
+    }
+
     setWorkingDirectory(file);
     return file;
+}
+
+bool FileDialog::refuseReadOnlyTarget(QWidget* parent, const QString& fileName)
+{
+    const std::filesystem::path target = Base::FileInfo::stringToPath(fileName.toStdString());
+    std::error_code ec;
+    if (!std::filesystem::exists(target, ec)) {
+        return false;
+    }
+    for (auto* doc : App::GetApplication().getDocuments()) {
+        if (!doc->isReadOnlyFile()) {
+            continue;
+        }
+        const auto docFile = Base::FileInfo::stringToPath(doc->FileName.getValue());
+        if (std::filesystem::equivalent(target, docFile, ec) && !ec) {
+            QMessageBox::warning(
+                parent ? parent : getMainWindow(),
+                FileDialog::tr("File is read-only"),
+                FileDialog::tr(
+                    "\"%1\" is read-only and cannot be overwritten.\n\n"
+                    "Choose a different file name."
+                )
+                    .arg(QString::fromStdString(Base::FileInfo::pathToString(docFile.filename())))
+            );
+            return true;
+        }
+    }
+    return false;
 }
 
 /**

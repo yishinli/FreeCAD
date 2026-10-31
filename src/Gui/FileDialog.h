@@ -128,6 +128,10 @@ public:
         qsizetype* selectedFilterIndex = nullptr,
         Options options = Options()
     );
+    /** Refuse the file of an open document that was opened read-only (or whose
+     * file it cannot write): say so and return true. Every save dialog checks it.
+     */
+    static bool refuseReadOnlyTarget(QWidget* parent, const QString& fileName);
     static QString getExistingDirectory(
         QWidget* parent = nullptr,
         const QString& caption = QString(),
