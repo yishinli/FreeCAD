@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
+disable_occt8_deprecation_warnings()
+
 set(InspectionGui_LIBS
     Inspection
     FreeCADGui
@@ -27,6 +29,8 @@ SET(InspectionGui_SRCS
     AppInspectionGui.cpp
     Command.cpp
     PreCompiled.h
+    TaskInterference.cpp
+    TaskInterference.h
     ViewProviderInspection.cpp
     ViewProviderInspection.h
     Workbench.cpp

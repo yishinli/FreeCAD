@@ -37,6 +37,7 @@
 #include <Mod/Inspection/App/InspectionFeature.h>
 
 #include "ViewProviderInspection.h"
+#include "TaskInterference.h"
 #include "VisualInspection.h"
 
 
@@ -116,9 +117,38 @@ bool CmdInspectElement::isActive()
     return false;
 }
 
+//--------------------------------------------------------------------------------------
+
+DEF_STD_CMD_A(CmdInterference)
+
+CmdInterference::CmdInterference()
+    : Command("Inspection_Interference")
+{
+    sAppModule = "Inspection";
+    sGroup = QT_TR_NOOP("Inspection");
+    sMenuText = QT_TR_NOOP("Interference");
+    sToolTipText = QT_TR_NOOP(
+        "Finds the visible parts that clash, touch or come closer than a clearance"
+    );
+    sWhatsThis = "Inspection_Interference";
+    sStatusTip = sToolTipText;
+    sPixmap = "Inspection_Interference";
+}
+
+void CmdInterference::activated(int)
+{
+    Gui::Control().showDialog(new InspectionGui::TaskInterference());
+}
+
+bool CmdInterference::isActive()
+{
+    return App::GetApplication().getActiveDocument() && !Gui::Control().activeDialog();
+}
+
 void CreateInspectionCommands()
 {
     Gui::CommandManager& rcCmdMgr = Gui::Application::Instance->commandManager();
     rcCmdMgr.addCommand(new CmdVisualInspection());
     rcCmdMgr.addCommand(new CmdInspectElement());
+    rcCmdMgr.addCommand(new CmdInterference());
 }

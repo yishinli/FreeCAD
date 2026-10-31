@@ -2,6 +2,7 @@
     <qresource>
         <file>icons/inspect_pipette.svg</file>
         <file>icons/InspectionWorkbench.svg</file>
+        <file>icons/Inspection_Interference.svg</file>
         <file>translations/Inspection_fr.qm</file>
         <file>translations/Inspection_hu.qm</file>
         <file>translations/Inspection_pl.qm</file>

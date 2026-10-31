@@ -46,7 +46,8 @@ Gui::MenuItem* Workbench::setupMenuBar() const
     root->insertItem(item, insp);
     insp->setCommand("Inspection");
     *insp << "Inspection_VisualInspection"
-          << "Inspection_InspectElement";
+          << "Inspection_InspectElement"
+          << "Inspection_Interference";
     return root;
 }
 
@@ -56,6 +57,7 @@ Gui::ToolBarItem* Workbench::setupToolBars() const
     Gui::ToolBarItem* insp = new Gui::ToolBarItem(root);
     insp->setCommand("Inspection");
     *insp << "Inspection_VisualInspection"
-          << "Inspection_InspectElement";
+          << "Inspection_InspectElement"
+          << "Inspection_Interference";
     return root;
 }
