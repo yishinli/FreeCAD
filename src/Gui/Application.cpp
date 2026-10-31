@@ -22,6 +22,8 @@
 
 #include <FCConfig.h>
 
+#include <filesystem>
+
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <Inventor/errors/SoDebugError.h>
 #include <Inventor/errors/SoError.h>
@@ -946,8 +948,48 @@ void Application::importFrom(const char* FileName, const char* DocName, const ch
     }
 }
 
+namespace
+{
+/// An open document that was opened read-only from this file, if any.
+App::Document* readOnlyDocumentOf(const char* fileName)
+{
+    std::error_code ec;
+    if (!std::filesystem::exists(Base::FileInfo::stringToPath(fileName), ec)) {
+        return nullptr;
+    }
+    for (auto* doc : App::GetApplication().getDocuments()) {
+        if (!doc->isReadOnlyFile()) {
+            continue;
+        }
+        if (std::filesystem::equivalent(
+                Base::FileInfo::stringToPath(fileName),
+                Base::FileInfo::stringToPath(doc->FileName.getValue()),
+                ec
+            )
+            && !ec) {
+            return doc;
+        }
+    }
+    return nullptr;
+}
+}  // namespace
+
 void Application::exportTo(const char* FileName, const char* DocName, const char* Module)
 {
+    // Saving refuses a file opened read-only; exporting over it must too.
+    if (auto* doc = readOnlyDocumentOf(FileName)) {
+        QMessageBox::warning(
+            getMainWindow(),
+            QObject::tr("Document is read-only"),
+            QObject::tr(
+                "\"%1\" was opened read-only and cannot be overwritten.\n\n"
+                "Export to a file under a new name."
+            )
+                .arg(QString::fromUtf8(doc->Label.getValue()))
+        );
+        return;
+    }
+
     WaitCursor wc;
     wc.setIgnoreEvents(WaitCursor::NoEvents);
     Base::FileInfo File(FileName);
