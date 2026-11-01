@@ -1,4 +1,5 @@
 SET(ShortcutStyles_Files
+        "Fusion.txt"
         "SolidWorks.txt"
 )
 
