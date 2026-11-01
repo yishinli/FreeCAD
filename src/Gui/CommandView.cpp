@@ -97,6 +97,7 @@
 #include "Selection/SoFCUnifiedSelection.h"
 #include "SelectionObject.h"
 #include "SoFCOffscreenRenderer.h"
+#include "TaskExplodedView.h"
 #include "TextureMapping.h"
 #include "Tools.h"
 #include "Tree.h"
@@ -107,6 +108,7 @@
 #include "ViewParams.h"
 #include "ViewProviderGeometryObject.h"
 #include "ViewProviderLink.h"
+#include "VisibleParts.h"
 #include "WaitCursor.h"
 
 using namespace Gui;
@@ -3991,10 +3993,8 @@ private:
     void apply(Gui::Document& doc, State& state)
     {
         state.parts.clear();
-        for (App::DocumentObject* root : doc.getDocument()->getRootObjectsIgnoreLinks()) {
-            if (root->Visibility.getValue()) {
-                collect(root, std::string(), 0, state.parts);
-            }
+        for (App::DocumentObject* root : VisibleParts::roots(doc.getDocument())) {
+            VisibleParts::collect(root, std::string(), state.parts);
         }
         for (const auto& part : state.parts) {
             SoPath* path = pathOf(doc, part);
@@ -4030,55 +4030,6 @@ private:
                     link->reapplyColorOverrides();
                 }
             }
-        }
-    }
-
-    // The visible parts under obj, at sub from root: an object with faces (a Part feature, a
-    // PartDesign body) is one part; groups, App::Part and links are opened. Sketches, datums
-    // and meshes have no faces to colour.
-    static void collect(
-        App::DocumentObject* root,
-        const std::string& sub,
-        int depth,
-        std::vector<App::SubObjectT>& parts
-    )
-    {
-        constexpr int maxDepth = 64;  // a link that leads back to itself
-        App::DocumentObject* obj = sub.empty() ? root : root->getSubObject(sub.c_str());
-        if (!obj || depth > maxDepth) {
-            return;
-        }
-        App::DocumentObject* linked = obj->getLinkedObject(true);
-        if (!linked) {
-            linked = obj;
-        }
-        if (auto* geo = freecad_cast<App::GeoFeature*>(linked)) {
-            if (const auto* prop = geo->getPropertyOfGeometry()) {
-                const Data::ComplexGeoData* data = prop->getComplexData();
-                if (data && data->countSubElements("Face") > 0) {
-                    parts.emplace_back(root, sub.c_str());
-                }
-                return;
-            }
-        }
-        if (!linked->hasExtension(App::GroupExtension::getExtensionClassTypeId())
-            && !obj->hasExtension(App::LinkBaseExtension::getExtensionClassTypeId())) {
-            return;
-        }
-        for (const std::string& child : obj->getSubObjects(App::DocumentObject::GS_SELECT)) {
-            App::DocumentObject* childObj = obj->getSubObject(child.c_str());
-            if (!childObj) {
-                continue;
-            }
-            std::string element = child;
-            if (!element.empty() && element.back() == '.') {
-                element.pop_back();
-            }
-            const int visible = obj->isElementVisible(element.c_str());
-            if (visible == 0 || (visible < 0 && !childObj->Visibility.getValue())) {
-                continue;
-            }
-            collect(root, sub + child, depth + 1, parts);
         }
     }
 
@@ -4136,6 +4087,37 @@ Action* StdCmdPartColors::createAction()
     Action* pcAction = Command::createAction();
     pcAction->setCheckable(true);
     return pcAction;
+}
+
+//===========================================================================
+// Std_ExplodedView
+//===========================================================================
+
+DEF_STD_CMD_A(StdCmdExplodedView)
+
+StdCmdExplodedView::StdCmdExplodedView()
+    : Command("Std_ExplodedView")
+{
+    sGroup = "View";
+    sMenuText = QT_TR_NOOP("&Exploded View");
+    sToolTipText = QT_TR_NOOP(
+        "Moves the components of the assembly apart to look at; the document is not changed"
+    );
+    sWhatsThis = "Std_ExplodedView";
+    sStatusTip = sToolTipText;
+    sPixmap = "Std_ExplodedView";
+    eType = Alter3DView;
+}
+
+void StdCmdExplodedView::activated(int iMsg)
+{
+    Q_UNUSED(iMsg);
+    Gui::Control().showDialog(new TaskExplodedView());
+}
+
+bool StdCmdExplodedView::isActive()
+{
+    return Application::Instance->activeDocument() && !Gui::Control().activeDialog();
 }
 
 //===========================================================================
@@ -4864,6 +4846,7 @@ void CreateViewStdCommands()
     rcCmdMgr.addCommand(new StdCmdAxisCross());
     rcCmdMgr.addCommand(new StdCmdSelBoundingBox());
     rcCmdMgr.addCommand(new StdCmdPartColors());
+    rcCmdMgr.addCommand(new StdCmdExplodedView());
     rcCmdMgr.addCommand(new StdCmdTreeViewActions());
     rcCmdMgr.addCommand(new StdCmdDockOverlay());
     rcCmdMgr.addCommand(new StdCmdToggleBottomPanels());
