@@ -24,6 +24,7 @@
 #include <map>
 
 #include <QCheckBox>
+#include <QLocale>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QHeaderView>
@@ -50,6 +51,7 @@
 #include <App/Application.h>
 #include <App/Document.h>
 #include <Base/Quantity.h>
+#include <Base/UnitsApi.h>
 #include <Gui/Application.h>
 #include <Gui/BitmapFactory.h>
 #include <Gui/Command.h>
@@ -108,17 +110,53 @@ QString kindText(InterferenceKind kind)
     }
 }
 
-QString length(double value)
+/// One unit and one number of decimals for every value of a kind in the list, so the column
+/// does not mix mm and µm (or inch and mil): the unit the schema in Preferences picks for the
+/// largest value, and as many decimals as Preferences say, or more to give the smallest value
+/// two significant digits
+class ColumnUnit
 {
-    // To the nanometre, so 0.1 mm measured as 0.0999999 is not shown in another unit
-    value = std::round(value * 1e6) / 1e6;
-    return QString::fromStdString(Base::Quantity(value, Base::Unit::Length).getUserString());
-}
+public:
+    ColumnUnit(double smallest, double largest, const Base::Unit& unit)
+    {
+        const int preferred = Base::UnitsApi::getDecimals();
+        const int most = std::max(preferred, 6);
+        pick(largest, unit);
+        decimals = std::max(preferred, needed(smallest));
+        if (decimals > most) {
+            // Values so far apart that the smallest would show as zeros: its unit instead, the
+            // largest then has more integer digits
+            pick(smallest, unit);
+            decimals = std::clamp(needed(smallest), preferred, most);
+        }
+    }
 
-QString volume(double value)
-{
-    return QString::fromStdString(Base::Quantity(value, Base::Unit::Volume).getUserString());
-}
+    QString format(double value) const
+    {
+        return QLocale().toString(value / factor, 'f', decimals) + QLatin1Char(' ') + name;
+    }
+
+private:
+    void pick(double value, const Base::Unit& unit)
+    {
+        std::string unitName;
+        Base::Quantity(value, unit).getUserString(factor, unitName);
+        if (factor <= 0.0) {
+            factor = 1.0;
+        }
+        name = QString::fromStdString(unitName);
+    }
+
+    /// Decimals giving value two significant digits in the unit picked
+    int needed(double value) const
+    {
+        return value > 0.0 ? static_cast<int>(std::ceil(-std::log10(value / factor))) + 1 : 0;
+    }
+
+    double factor = 1.0;
+    QString name;
+    int decimals = 2;
+};
 
 SoSeparator* markers(const std::vector<SbVec3f>& points, InterferenceKind kind)
 {
@@ -383,6 +421,24 @@ void TaskInterference::fillList()
     int touching = 0;
     int close = 0;
     int unchecked = static_cast<int>(meshes.size());
+    double smallestGap = 0.0;
+    double largestGap = 0.0;
+    double smallestVolume = 0.0;
+    double largestVolume = 0.0;
+    auto widen = [](double& smallest, double& largest, double value) {
+        smallest = (largest == 0.0) ? value : std::min(smallest, value);
+        largest = std::max(largest, value);
+    };
+    for (const auto& result : report.results) {
+        if (result.kind == InterferenceKind::Clearance) {
+            widen(smallestGap, largestGap, result.distance);
+        }
+        else if (result.kind == InterferenceKind::Clash) {
+            widen(smallestVolume, largestVolume, result.volume);
+        }
+    }
+    const ColumnUnit gapUnit(smallestGap, largestGap, Base::Unit::Length);
+    const ColumnUnit volumeUnit(smallestVolume, largestVolume, Base::Unit::Volume);
     for (std::size_t i = 0; i < report.results.size(); ++i) {
         const auto& result = report.results[i];
         switch (result.kind) {
@@ -412,10 +468,10 @@ void TaskInterference::fillList()
         item->setText(2, QString::fromStdString(parts[result.second].name));
         switch (result.kind) {
             case InterferenceKind::Clash:
-                item->setText(3, volume(result.volume));
+                item->setText(3, volumeUnit.format(result.volume));
                 break;
             case InterferenceKind::Clearance:
-                item->setText(3, length(result.distance));
+                item->setText(3, gapUnit.format(result.distance));
                 break;
             case InterferenceKind::Contact:
                 break;
