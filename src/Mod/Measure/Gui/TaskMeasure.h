@@ -106,6 +106,15 @@ private:
     fastsignals::scoped_connection m_savedConnection;
     // The preview went into a saved file, so removing it changes the document again
     bool m_previewSaved = false;
+    fastsignals::scoped_connection m_changedConnection;
+    fastsignals::scoped_connection m_newConnection;
+    fastsignals::scoped_connection m_viewChangedConnection;
+    fastsignals::scoped_connection m_appendConnection;
+    fastsignals::scoped_connection m_removeConnection;
+    // Something besides the preview changed in the open transaction, which closing keeps
+    bool m_otherChange = false;
+    bool m_creating = false;
+    void noteChange(const App::DocumentObject* obj);
 
     void removeObject();
     void onModeChanged(int index);

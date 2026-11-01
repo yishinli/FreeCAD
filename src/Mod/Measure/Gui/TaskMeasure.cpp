@@ -40,6 +40,7 @@
 #include <Gui/Control.h>
 #include <Gui/Document.h>
 #include <Gui/ViewProvider.h>
+#include <Gui/ViewProviderDocumentObject.h>
 #include <Gui/InputHint.h>
 
 using enum Gui::InputHint::UserInput;
@@ -53,6 +54,7 @@ using enum Gui::InputHint::UserInput;
 #include <QSignalBlocker>
 
 #include <Base/Quantity.h>
+#include <Base/Tools.h>
 #include <Base/UnitsApi.h>
 #include <array>
 #include <utility>
@@ -233,10 +235,38 @@ TaskMeasure::TaskMeasure()
 
     // engage the selectionObserver
 
-    if (auto* doc = App::GetApplication().getActiveDocument()) {
+    auto* activeDoc = Gui::Application::Instance->activeDocument();
+    if (auto* doc = activeDoc ? activeDoc->getDocument() : nullptr) {
         m_deletedConnection = doc->signalDeletedObject.connect([this](auto&& obj) {
             onObjectDeleted(obj);
         });
+        m_changedConnection = doc->signalChangedObject.connect([this](auto&& obj, auto&&) {
+            noteChange(&obj);
+        });
+        m_newConnection = doc->signalNewObject.connect([this](auto&& obj) { noteChange(&obj); });
+        // The document object a property belongs to, itself or through its view provider
+        auto ownerIn = [doc](const App::PropertyContainer* container) -> const App::DocumentObject* {
+            const App::DocumentObject* obj = dynamic_cast<const App::DocumentObject*>(container);
+            if (auto* vp = dynamic_cast<const Gui::ViewProviderDocumentObject*>(container)) {
+                obj = vp->getObject();
+            }
+            return obj && obj->getDocument() == doc ? obj : nullptr;
+        };
+        m_viewChangedConnection = Gui::Application::Instance->signalChangedObject.connect(
+            [this, ownerIn](const Gui::ViewProvider& vp, const App::Property&) {
+                if (auto* obj = ownerIn(&vp)) {
+                    noteChange(obj);
+                }
+            }
+        );
+        // Adding or removing a property goes into the transaction without a change signal
+        auto dynamicChange = [this, ownerIn](const App::Property& prop) {
+            if (auto* obj = ownerIn(prop.getContainer())) {
+                noteChange(obj);
+            }
+        };
+        m_appendConnection = App::GetApplication().signalAppendDynamicProperty.connect(dynamicChange);
+        m_removeConnection = App::GetApplication().signalRemoveDynamicProperty.connect(dynamicChange);
     }
     m_savedConnection = App::GetApplication().signalFinishSaveDocument.connect(
         [this](const App::Document& doc, const std::string&) {
@@ -306,6 +336,7 @@ void TaskMeasure::createObject(const App::MeasureType* measureType)
     // for a save, and a document opened only to look at stays unmodified
     Gui::Document* guiDoc = Gui::Application::Instance->getDocument(doc);
     const bool wasModified = guiDoc && guiDoc->isModified();
+    Base::FlagToggler<> creating(m_creating);
 
     if (measureType->isPython) {
         Base::PyGILStateLocker lock;
@@ -584,6 +615,7 @@ bool TaskMeasure::apply(bool reset)
         mTargetDoc->commitCommand();
         mTargetDoc->openCommand("Add Measurement");
     }
+    m_otherChange = false;
     return false;
 }
 
@@ -592,9 +624,15 @@ bool TaskMeasure::reject()
     removeObject();
 
     // Commit after removing the preview measurement so only intended changes (sector flip)
-    // remain in the document transaction.
+    // remain in the document transaction. With nothing else changed the transaction is
+    // dropped, so closing leaves no empty undo step.
     if (mTargetDoc) {
-        mTargetDoc->commitCommand();
+        if (m_otherChange) {
+            mTargetDoc->commitCommand();
+        }
+        else {
+            mTargetDoc->abortCommand();
+        }
     }
     closeDialog();
     return false;
@@ -729,6 +767,19 @@ void TaskMeasure::onObjectDeleted(const App::DocumentObject& obj)
                 guiDoc->setModified(true);
             }
         }
+    }
+    else {
+        noteChange(&obj);
+    }
+}
+
+void TaskMeasure::noteChange(const App::DocumentObject* obj)
+{
+    // Measurement previews, this one or one being replaced, are marked NoModify
+    const bool preview = obj == _mMeasureObject
+        || (obj && obj->isDerivedFrom<Measure::MeasureBase>() && obj->testStatus(App::NoModify));
+    if (!m_creating && obj && !preview) {
+        m_otherChange = true;
     }
 }
 
