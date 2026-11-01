@@ -38,6 +38,7 @@
 
 #include "ViewProviderInspection.h"
 #include "TaskInterference.h"
+#include "TaskPartsList.h"
 #include "VisualInspection.h"
 
 
@@ -145,10 +146,39 @@ bool CmdInterference::isActive()
     return App::GetApplication().getActiveDocument() && !Gui::Control().activeDialog();
 }
 
+//--------------------------------------------------------------------------------------
+
+DEF_STD_CMD_A(CmdPartsList)
+
+CmdPartsList::CmdPartsList()
+    : Command("Inspection_PartsList")
+{
+    sAppModule = "Inspection";
+    sGroup = QT_TR_NOOP("Inspection");
+    sMenuText = QT_TR_NOOP("Parts List");
+    sToolTipText = QT_TR_NOOP(
+        "Lists the parts counted by shape, so copies are one line even as separate objects"
+    );
+    sWhatsThis = "Inspection_PartsList";
+    sStatusTip = sToolTipText;
+    sPixmap = "Inspection_PartsList";
+}
+
+void CmdPartsList::activated(int)
+{
+    Gui::Control().showDialog(new InspectionGui::TaskPartsList());
+}
+
+bool CmdPartsList::isActive()
+{
+    return App::GetApplication().getActiveDocument() && !Gui::Control().activeDialog();
+}
+
 void CreateInspectionCommands()
 {
     Gui::CommandManager& rcCmdMgr = Gui::Application::Instance->commandManager();
     rcCmdMgr.addCommand(new CmdVisualInspection());
     rcCmdMgr.addCommand(new CmdInspectElement());
     rcCmdMgr.addCommand(new CmdInterference());
+    rcCmdMgr.addCommand(new CmdPartsList());
 }

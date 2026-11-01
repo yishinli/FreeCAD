@@ -102,18 +102,20 @@ public:
      * object: groups, App::Part, assemblies and links are opened, while a shape feature
      * (a PartDesign Body, a Part feature) is one part. A path may end inside a container.
      * Mesh objects are not checked; their names go to unchecked. A part reached twice is
-     * listed once.
+     * listed once. With visibleOnly false, hidden parts and containers are taken as well.
      */
     static std::vector<InterferencePart> collectParts(
         const std::vector<App::SubObjectT>& objects,
-        std::vector<std::string>* unchecked = nullptr
+        std::vector<std::string>* unchecked = nullptr,
+        bool visibleOnly = true
     );
 
     /// The visible solid parts of a document. An object a link points to is a part of its
     /// own when it is visible as well, as both are drawn.
     static std::vector<InterferencePart> collectParts(
         const App::Document* doc,
-        std::vector<std::string>* unchecked = nullptr
+        std::vector<std::string>* unchecked = nullptr,
+        bool visibleOnly = true
     );
 
     /**

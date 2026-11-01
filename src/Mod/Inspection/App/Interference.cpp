@@ -64,12 +64,38 @@ namespace
 // Deeper than any real assembly; it stops a link that leads back to itself
 constexpr int maxDepth = 64;
 
+// A hidden object that something else shows instead: the source of a link, or the input of
+// a shape feature (a Cut's operands, an array's base, a clone's source). Containers holding
+// it, and objects inside it (a Body's own features), do not count; nor do joints and
+// measurements, which are not shape features, nor a section, which only looks at its
+// sources.
+bool consumed(const App::DocumentObject* obj)
+{
+    static const Base::Type section = Base::Type::fromName("Part::SectionAnalysis");
+    auto* group = obj->getExtensionByType<App::GroupExtension>(true);
+    for (App::DocumentObject* user : obj->getInList()) {
+        if (!user || user->getDocument() != obj->getDocument()
+            || (group && group->hasObject(user, true))) {
+            continue;
+        }
+        if (user->hasExtension(App::LinkBaseExtension::getExtensionClassTypeId())
+            && user->getLinkedObject(false) == obj) {
+            return true;
+        }
+        if (user->isDerivedFrom<Part::Feature>() && !user->getTypeId().isDerivedFrom(section)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 class PartCollector
 {
 public:
     std::vector<InterferencePart> parts;
     std::vector<std::string>* unchecked = nullptr;
     std::set<std::string> keys;
+    bool visibleOnly = true;
 
     // obj is root itself or the object at sub, a path from root ending in '.'
     void collect(App::DocumentObject* root, const std::string& sub, const std::string& path, int depth)
@@ -124,7 +150,9 @@ public:
             }
             const int visible = obj->isElementVisible(element.c_str());
             if (visible == 0 || (visible < 0 && !childObj->Visibility.getValue())) {
-                continue;
+                if (visibleOnly || consumed(childObj)) {
+                    continue;
+                }
             }
             collect(root, sub + child, name, depth + 1);
         }
@@ -263,11 +291,13 @@ InterferenceResult measure(
 
 std::vector<InterferencePart> InterferenceCheck::collectParts(
     const std::vector<App::SubObjectT>& objects,
-    std::vector<std::string>* unchecked
+    std::vector<std::string>* unchecked,
+    bool visibleOnly
 )
 {
     PartCollector collector;
     collector.unchecked = unchecked;
+    collector.visibleOnly = visibleOnly;
     for (const auto& objT : objects) {
         App::DocumentObject* root = objT.getObject();
         if (!root) {
@@ -281,19 +311,20 @@ std::vector<InterferencePart> InterferenceCheck::collectParts(
 
 std::vector<InterferencePart> InterferenceCheck::collectParts(
     const App::Document* doc,
-    std::vector<std::string>* unchecked
+    std::vector<std::string>* unchecked,
+    bool visibleOnly
 )
 {
     std::vector<App::SubObjectT> roots;
     if (doc) {
         // As the tree shows them: an object a link points to is still drawn itself
         for (auto* obj : doc->getRootObjectsIgnoreLinks()) {
-            if (obj->Visibility.getValue()) {
+            if (obj->Visibility.getValue() || (!visibleOnly && !consumed(obj))) {
                 roots.emplace_back(obj, "");
             }
         }
     }
-    return collectParts(roots, unchecked);
+    return collectParts(roots, unchecked, visibleOnly);
 }
 
 InterferenceReport InterferenceCheck::check(

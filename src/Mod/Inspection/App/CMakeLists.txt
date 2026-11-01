@@ -15,6 +15,8 @@ SET(Inspection_SRCS
     InspectionFeature.h
     Interference.cpp
     Interference.h
+    PartsList.cpp
+    PartsList.h
     PreCompiled.h
 )
 

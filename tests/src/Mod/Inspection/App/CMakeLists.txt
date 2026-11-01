@@ -2,6 +2,7 @@
 
 add_executable(Inspection_tests_run
         Interference.cpp
+        PartsList.cpp
 )
 
 target_include_directories(Inspection_tests_run PUBLIC

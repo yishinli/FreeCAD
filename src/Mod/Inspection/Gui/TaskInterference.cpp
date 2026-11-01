@@ -65,6 +65,7 @@
 #include <Gui/WaitCursor.h>
 #include <Mod/Part/App/TopoShape.h>
 
+#include "ColumnUnit.h"
 #include "TaskInterference.h"
 
 using namespace InspectionGui;
@@ -109,54 +110,6 @@ QString kindText(InterferenceKind kind)
             return QObject::tr("Not checked");
     }
 }
-
-/// One unit and one number of decimals for every value of a kind in the list, so the column
-/// does not mix mm and µm (or inch and mil): the unit the schema in Preferences picks for the
-/// largest value, and as many decimals as Preferences say, or more to give the smallest value
-/// two significant digits
-class ColumnUnit
-{
-public:
-    ColumnUnit(double smallest, double largest, const Base::Unit& unit)
-    {
-        const int preferred = Base::UnitsApi::getDecimals();
-        const int most = std::max(preferred, 6);
-        pick(largest, unit);
-        decimals = std::max(preferred, needed(smallest));
-        if (decimals > most) {
-            // Values so far apart that the smallest would show as zeros: its unit instead, the
-            // largest then has more integer digits
-            pick(smallest, unit);
-            decimals = std::clamp(needed(smallest), preferred, most);
-        }
-    }
-
-    QString format(double value) const
-    {
-        return QLocale().toString(value / factor, 'f', decimals) + QLatin1Char(' ') + name;
-    }
-
-private:
-    void pick(double value, const Base::Unit& unit)
-    {
-        std::string unitName;
-        Base::Quantity(value, unit).getUserString(factor, unitName);
-        if (factor <= 0.0) {
-            factor = 1.0;
-        }
-        name = QString::fromStdString(unitName);
-    }
-
-    /// Decimals giving value two significant digits in the unit picked
-    int needed(double value) const
-    {
-        return value > 0.0 ? static_cast<int>(std::ceil(-std::log10(value / factor))) + 1 : 0;
-    }
-
-    double factor = 1.0;
-    QString name;
-    int decimals = 2;
-};
 
 SoSeparator* markers(const std::vector<SbVec3f>& points, InterferenceKind kind)
 {

@@ -27,10 +27,13 @@ SET(InspectionGui_SRCS
     ${Inspection_QRC_SRCS}
     ${Dialogs_SRCS}
     AppInspectionGui.cpp
+    ColumnUnit.h
     Command.cpp
     PreCompiled.h
     TaskInterference.cpp
     TaskInterference.h
+    TaskPartsList.cpp
+    TaskPartsList.h
     ViewProviderInspection.cpp
     ViewProviderInspection.h
     Workbench.cpp
