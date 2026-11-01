@@ -751,7 +751,7 @@ void ViewProviderSectionAnalysis::updateRemovedMaterial()
     }
     if (totalTriangles > maxRemovedMaterialTriangles) {
         Base::Console().warning(
-            "SectionAnalysis: not drawing the cut-away removed material, %zu triangles is too "
+            "SectionAnalysis: not drawing the cut-away removed material, {} triangles is too "
             "many to copy for a visual aid.\n",
             totalTriangles
         );
