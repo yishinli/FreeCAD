@@ -118,8 +118,9 @@ public:
 
     /**
      * Check the parts with indices in group against each other, or, when others is not
-     * empty, each of group against each of others. The progress bar can stop the check;
-     * pairs not reached are then unchecked.
+     * empty, each of group against each of others. Pairs are measured on several threads
+     * and listed in order. The progress bar can stop the check; pairs not reached are then
+     * unchecked.
      */
     static InterferenceReport check(
         const std::vector<InterferencePart>& parts,

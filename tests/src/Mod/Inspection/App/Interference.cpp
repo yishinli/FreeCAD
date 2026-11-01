@@ -280,4 +280,46 @@ TEST_F(Interference, aPartPickedTwiceIsCheckedOnce)
     auto report = InterferenceCheck::check(picked, {0, 1}, {}, {});
     EXPECT_TRUE(report.results.empty());
 }
+TEST_F(Interference, budgetLeavesTheRestUnchecked)
+{
+    // A row of boxes, each overlapping the next; no time at all
+    for (int i = 0; i < 20; ++i) {
+        addBox(("B" + std::to_string(i)).c_str(), 5.0 * i);
+    }
+    InterferenceSettings settings;
+    settings.budget = 0.0;
+
+    auto report = checkAll(settings);
+
+    std::size_t unchecked = 0;
+    for (const auto& result : report.results) {
+        if (result.kind == InterferenceKind::Unchecked) {
+            EXPECT_EQ(result.reason, "the time budget ran out");
+            ++unchecked;
+        }
+    }
+    // With no time, no pair whose boxes meet is measured: all are listed as unchecked
+    EXPECT_EQ(report.checked, 0u);
+    EXPECT_EQ(unchecked, report.pairs - report.pruned);
+    EXPECT_GT(unchecked, 0u);
+}
+
+TEST_F(Interference, manyPairsGiveTheSameResultsInOrder)
+{
+    // Measured on several threads, listed in the order of the pairs
+    for (int i = 0; i < 30; ++i) {
+        addBox(("B" + std::to_string(i)).c_str(), 5.0 * i);
+    }
+
+    auto report = checkAll();
+
+    ASSERT_EQ(report.results.size(), 29u + 28u);  // next box: clash; the one after: contact
+    for (std::size_t k = 1; k < report.results.size(); ++k) {
+        const auto& before = report.results[k - 1];
+        const auto& after = report.results[k];
+        EXPECT_TRUE(
+            before.first < after.first || (before.first == after.first && before.second < after.second)
+        );
+    }
+}
 // NOLINTEND

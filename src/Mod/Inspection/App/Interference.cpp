@@ -20,10 +20,15 @@
  ******************************************************************************/
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <set>
+#include <thread>
 #include <utility>
 
+#include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
@@ -35,6 +40,7 @@
 #include <ShapeAnalysis_ShapeTolerance.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 
 #include <App/Document.h>
@@ -44,7 +50,7 @@
 #include <Base/Exception.h>
 #include <Base/Sequencer.h>
 #include <Mod/Mesh/App/MeshFeature.h>
-#include <Mod/Part/App/FCBRepAlgoAPI_Common.h>
+#include <Mod/Part/App/FCBRepAlgoAPI_BooleanOperation.h>
 #include <Mod/Part/App/PartFeature.h>
 
 #include "Interference.h"
@@ -212,7 +218,18 @@ InterferenceResult measure(
     }
 
     // Touching, or one inside the other: only now is it worth intersecting them
-    FCBRepAlgoAPI_Common common(a.shape, b.shape);
+    // Not FCBRepAlgoAPI_Common: its constructor checks both shapes' validity for every pair, and
+    // its Build() sets process-wide signal handlers, which must not run on several threads
+    BRepAlgoAPI_Common common;
+    TopTools_ListOfShape arguments;
+    arguments.Append(a.shape);
+    TopTools_ListOfShape tools;
+    tools.Append(b.shape);
+    common.SetArguments(arguments);
+    common.SetTools(tools);
+    common.SetNonDestructive(Standard_True);
+    FCBRepAlgoAPIHelper::setAutoFuzzy(&common);
+    common.Build();
     if (!common.IsDone()) {
         return unchecked(first, second, "the parts could not be intersected");
     }
@@ -331,39 +348,126 @@ InterferenceReport InterferenceCheck::check(
         }
     }
 
-    const auto start = std::chrono::steady_clock::now();
-    const auto budget = std::chrono::duration<double>(settings.budget);
-    std::string stopped;
-    Base::SequencerLauncher progress("Checking interference...", candidates.size());
+    // Shapes are only read, so the pairs are measured on several threads; the progress bar and
+    // stopping stay on this one
+    std::vector<InterferenceResult> results(candidates.size());
+    std::vector<char> measured(candidates.size(), 0);
     for (const auto& [i, j] : candidates) {
-        if (stopped.empty() && std::chrono::steady_clock::now() - start > budget) {
-            stopped = "the time budget ran out";
-        }
-        if (stopped.empty()) {
+        tolerance(i);  // filled here, read by the threads
+        tolerance(j);
+    }
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                              std::chrono::duration<double>(settings.budget)
+        );
+    std::atomic<std::size_t> next {0};
+    std::atomic<std::size_t> done {0};
+    std::atomic<bool> stop {false};
+    std::atomic<bool> outOfTime {false};
+    std::mutex mutex;
+    std::condition_variable progressed;
+    // No Base::Console or FC_* calls on this path: they reach the report view directly, off
+    // the GUI thread
+    auto work = [&]() {
+        while (!stop) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                outOfTime = true;
+                stop = true;
+                break;
+            }
+            const std::size_t k = next++;
+            if (k >= candidates.size()) {
+                break;
+            }
+            const auto [i, j] = candidates[k];
+            InterferenceResult result;
             try {
-                progress.next(true);
+                const double touching = std::max(settings.tolerance, tolerances[i] + tolerances[j]);
+                result = measure(parts[i], parts[j], i, j, settings, touching);
+            }
+            catch (const Standard_Failure& e) {
+                result = unchecked(i, j, e.GetMessageString() ? e.GetMessageString() : "OCC error");
+            }
+            catch (const Base::Exception& e) {
+                result = unchecked(i, j, e.what());
+            }
+            catch (const std::exception& e) {
+                result = unchecked(i, j, e.what());
+            }
+            catch (...) {
+                result = unchecked(i, j, "unknown error");
+            }
+            results[k] = std::move(result);
+            measured[k] = 1;
+            {
+                std::lock_guard lock(mutex);
+                ++done;
+            }
+            progressed.notify_one();
+        }
+        progressed.notify_one();
+    };
+
+    std::string stopped;
+    {
+        std::vector<std::thread> threads;
+        // However this block is left, the threads stop and are joined
+        struct StopAndJoin
+        {
+            std::atomic<bool>& stop;
+            std::vector<std::thread>& threads;
+            ~StopAndJoin()
+            {
+                stop = true;
+                for (auto& thread : threads) {
+                    if (thread.joinable()) {
+                        thread.join();
+                    }
+                }
+            }
+        } guard {stop, threads};
+        const std::size_t count = std::clamp<std::size_t>(std::thread::hardware_concurrency(), 1, 16);
+        threads.reserve(count);
+        for (std::size_t t = 0; t < count; ++t) {
+            threads.emplace_back(work);
+        }
+
+        Base::SequencerLauncher progress("Checking interference...", candidates.size());
+        std::size_t shown = 0;
+        while (shown < candidates.size() && !stop) {
+            {
+                std::unique_lock lock(mutex);
+                progressed.wait_for(lock, std::chrono::milliseconds(100), [&] {
+                    return done > shown || stop;
+                });
+            }
+            try {
+                const std::size_t now = done;
+                if (now == shown) {
+                    Base::Sequencer().checkAbort();  // a stop while slow pairs run
+                }
+                for (; shown < now; ++shown) {
+                    progress.next(true);
+                }
             }
             catch (const Base::AbortException&) {
                 stopped = "the check was stopped";
+                stop = true;
             }
         }
-        if (!stopped.empty()) {
+    }
+    if (stopped.empty() && outOfTime) {
+        stopped = "the time budget ran out";
+    }
+
+    for (std::size_t k = 0; k < candidates.size(); ++k) {
+        const auto [i, j] = candidates[k];
+        if (!measured[k]) {
             report.results.push_back(unchecked(i, j, stopped));
             continue;
         }
-
-        InterferenceResult result;
-        try {
-            const double touching = std::max(settings.tolerance, tolerance(i) + tolerance(j));
-            result = measure(parts[i], parts[j], i, j, settings, touching);
-        }
-        catch (const Standard_Failure& e) {
-            result = unchecked(i, j, e.GetMessageString() ? e.GetMessageString() : "OCC error");
-        }
-        catch (const Base::Exception& e) {
-            result = unchecked(i, j, e.what());
-        }
         ++report.checked;
+        InterferenceResult& result = results[k];
         if (result.kind != InterferenceKind::Unchecked || !result.reason.empty()) {
             report.results.push_back(std::move(result));
         }
