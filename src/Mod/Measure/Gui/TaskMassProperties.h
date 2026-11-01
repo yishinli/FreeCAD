@@ -29,6 +29,7 @@
 #include <vector>
 
 #include <Gui/Action.h>
+#include <App/DocumentObserver.h>
 #include <Gui/TaskView/TaskDialog.h>
 #include <Gui/TaskView/TaskView.h>
 #include <Gui/Selection/Selection.h>
@@ -57,6 +58,7 @@ public:
     void invoke();
     bool accept() override;
     bool reject() override;
+    void closed() override;
 
     void onSelectionChanged(const Gui::SelectionChanges& msg) override;
     void update(const Gui::SelectionChanges& msg);
@@ -101,6 +103,8 @@ private:
     // Documents saved while they held the preview: removing it changes them again
     fastsignals::scoped_connection connectFinishSave;
     std::vector<std::string> previewSavedIn;
+    // The document the preview goes into: the active one when the panel opened
+    App::DocumentT previewDoc;
 };
 
 }  // namespace MassPropertiesGui

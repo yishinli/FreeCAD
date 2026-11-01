@@ -266,6 +266,7 @@ TaskMassProperties::TaskMassProperties()
     , panel(new TaskMassPropertiesWidget)
     , selectingCustomCoordSystem(false)
 {
+    previewDoc = App::GetApplication().getActiveDocument();
     currentInfo = MassPropertiesData {};
     currentMode = MassPropertiesMode::CenterOfGravity;
     currentDatum = nullptr;
@@ -484,6 +485,12 @@ bool TaskMassProperties::reject()
     return true;
 }
 
+// Also when the dialog is closed without its buttons, such as by Gui.Control.closeDialog()
+void TaskMassProperties::closed()
+{
+    removeTemporaryObjects();
+}
+
 void TaskMassProperties::escape()
 {
     if (Gui::Selection().getSelection().empty()) {
@@ -507,7 +514,8 @@ void TaskMassProperties::escape()
 
 void TaskMassProperties::removeTemporaryObjects()
 {
-    App::Document* doc = App::GetApplication().getActiveDocument();
+    // Not the active document: closing another document closes its own panel too
+    App::Document* doc = previewDoc.getDocument();
     if (!doc || !doc->getObject("MassPropertiesPreview")) {
         return;
     }
@@ -1311,8 +1319,8 @@ void TaskMassProperties::tryUpdate()
 
     const auto infoSnapshot = currentInfo;
     if (info.mass.getValue() != 0.0) {
-        QTimer::singleShot(0, this, [infoSnapshot, hasAxisSelection]() {
-            App::Document* doc = App::GetApplication().getActiveDocument();
+        QTimer::singleShot(0, this, [this, infoSnapshot, hasAxisSelection]() {
+            App::Document* doc = previewDoc.getDocument();
             if (!doc) {
                 return;
             }
@@ -1333,7 +1341,7 @@ void TaskMassProperties::tryUpdate()
 
             obj->Visibility.setValue(true);
 
-            auto* guiDoc = Gui::Application::Instance->activeDocument();
+            auto* guiDoc = Gui::Application::Instance->getDocument(doc);
             if (!guiDoc) {
                 return;
             }
