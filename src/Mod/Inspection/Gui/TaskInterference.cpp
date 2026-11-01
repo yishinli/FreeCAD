@@ -20,6 +20,7 @@
  ******************************************************************************/
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 #include <QCheckBox>
@@ -109,6 +110,8 @@ QString kindText(InterferenceKind kind)
 
 QString length(double value)
 {
+    // To the nanometre, so 0.1 mm measured as 0.0999999 is not shown in another unit
+    value = std::round(value * 1e6) / 1e6;
     return QString::fromStdString(Base::Quantity(value, Base::Unit::Length).getUserString());
 }
 
