@@ -344,6 +344,14 @@ public:
         return true;
     }
 
+    /// Applies the link's own material and element colors again, after a secondary color
+    /// action (as Std_PartColors uses) cleared them
+    void reapplyColorOverrides()
+    {
+        applyMaterial();
+        applyColors();
+    }
+
     void setTransformation(const Base::Matrix4D& rcMatrix) override;
     void setTransformation(const SbMatrix& rcMatrix) override;
 

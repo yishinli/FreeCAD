@@ -21,7 +21,9 @@
  ***************************************************************************/
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <map>
 #include <set>
 #include <sstream>
@@ -33,7 +35,10 @@
 #include <Inventor/events/SoMouseButtonEvent.h>
 #include <Inventor/nodes/SoOrthographicCamera.h>
 #include <Inventor/nodes/SoPerspectiveCamera.h>
+#include <Inventor/SoPath.h>
+#include <Inventor/details/SoDetail.h>
 #include <Inventor/SoPickedPoint.h>
+#include <QColor>
 #include <QApplication>
 #include <QDialog>
 #include <QDockWidget>
@@ -52,6 +57,7 @@
 #include <QTimer>
 #include <QToolButton>
 
+#include <App/ComplexGeoData.h>
 #include <App/ComplexGeoDataPy.h>
 #include <App/Document.h>
 #include <App/DocumentObject.h>
@@ -88,6 +94,7 @@
 #include "Selection.h"
 #include "Selection/BoxSelection.h"
 #include "Selection/SelectionView.h"
+#include "Selection/SoFCUnifiedSelection.h"
 #include "SelectionObject.h"
 #include "SoFCOffscreenRenderer.h"
 #include "TextureMapping.h"
@@ -99,6 +106,7 @@
 #include "View3DInventorViewer.h"
 #include "ViewParams.h"
 #include "ViewProviderGeometryObject.h"
+#include "ViewProviderLink.h"
 #include "WaitCursor.h"
 
 using namespace Gui;
@@ -3874,6 +3882,263 @@ Action* StdCmdSelBoundingBox::createAction()
 }
 
 //===========================================================================
+// Std_PartColors
+//===========================================================================
+namespace
+{
+// Each visible part in a colour of its own, drawn over its appearance the way a selection
+// is highlighted: only the 3D views change, so the document is not modified and nothing of it
+// is saved. Copies of one part, links among them, each get their own colour. While on, parts
+// shown, hidden, added or recomputed are coloured again; a part keeps its colour meanwhile.
+class PartColors
+{
+public:
+    static PartColors& instance()
+    {
+        static PartColors colors;
+        return colors;
+    }
+
+    bool isOn(const Gui::Document* doc) const
+    {
+        return states.contains(doc);
+    }
+
+    void setOn(Gui::Document* doc, bool on)
+    {
+        if (!on) {
+            if (auto it = states.find(doc); it != states.end()) {
+                clear(*doc, it->second);
+                states.erase(it);
+            }
+            return;
+        }
+        if (isOn(doc)) {
+            return;
+        }
+        State& state = states[doc];
+        App::Document* appDoc = doc->getDocument();
+        auto later = [this, doc](auto&&...) {
+            refreshLater(doc);
+        };
+        state.connections.emplace_back(appDoc->signalRecomputed.connect(later));
+        state.connections.emplace_back(appDoc->signalNewObject.connect(later));
+        state.connections.emplace_back(appDoc->signalDeletedObject.connect(later));
+        state.connections.emplace_back(doc->signalChangedObject.connect(
+            [this, doc](const ViewProviderDocumentObject&, const App::Property& prop) {
+                if (std::strcmp(prop.getName(), "Visibility") == 0) {
+                    refreshLater(doc);
+                }
+            }
+        ));
+        apply(*doc, state);
+    }
+
+private:
+    struct State
+    {
+        std::vector<App::SubObjectT> parts;              // as coloured last
+        std::map<std::string, std::size_t> colourIndex;  // by part, kept while on
+        std::vector<fastsignals::scoped_connection> connections;
+        bool pending = false;
+    };
+
+    PartColors()
+    {
+        deleted = Application::Instance->signalDeleteDocument.connect(
+            [this](const Gui::Document& doc) { states.erase(&doc); }
+        );
+    }
+
+    void refreshLater(Gui::Document* doc)
+    {
+        auto it = states.find(doc);
+        if (it == states.end() || it->second.pending) {
+            return;
+        }
+        it->second.pending = true;
+        QTimer::singleShot(0, getMainWindow(), [this, doc]() {
+            auto it = states.find(doc);
+            if (it == states.end()) {
+                return;
+            }
+            it->second.pending = false;
+            clear(*doc, it->second);
+            apply(*doc, it->second);
+        });
+    }
+
+    // The part's path in the scene now: kept paths would go stale when nodes are rebuilt
+    static SoPath* pathOf(Gui::Document& doc, const App::SubObjectT& part)
+    {
+        App::DocumentObject* root = part.getObject();
+        auto* vp = root ? freecad_cast<ViewProviderDocumentObject*>(doc.getViewProvider(root))
+                        : nullptr;
+        if (!vp) {
+            return nullptr;
+        }
+        auto* path = new SoPath(10);
+        path->ref();
+        SoDetail* detail = nullptr;
+        if (!vp->getDetailPath(part.getSubName().c_str(), static_cast<SoFullPath*>(path), true, detail)) {
+            path->unref();
+            return nullptr;
+        }
+        delete detail;
+        return path;
+    }
+
+    void apply(Gui::Document& doc, State& state)
+    {
+        state.parts.clear();
+        for (App::DocumentObject* root : doc.getDocument()->getRootObjectsIgnoreLinks()) {
+            if (root->Visibility.getValue()) {
+                collect(root, std::string(), 0, state.parts);
+            }
+        }
+        for (const auto& part : state.parts) {
+            SoPath* path = pathOf(doc, part);
+            if (!path) {
+                continue;
+            }
+            const std::string key = part.getObjectName() + "." + part.getSubName();
+            const std::size_t index
+                = state.colourIndex.try_emplace(key, state.colourIndex.size()).first->second;
+            std::map<std::string, Base::Color> colors {{"Face", colorOf(index)}};
+            SoSelectionElementAction action(SoSelectionElementAction::Color, true);
+            action.swapColors(colors);
+            action.apply(path);
+            path->unref();
+        }
+    }
+
+    // Back to the appearance. The action also clears what links set on the same paths, so
+    // links on the way apply their own colours again.
+    static void clear(Gui::Document& doc, const State& state)
+    {
+        for (const auto& part : state.parts) {
+            SoPath* path = pathOf(doc, part);
+            if (!path) {
+                continue;
+            }
+            SoSelectionElementAction action(SoSelectionElementAction::Color, true);
+            action.apply(path);
+            path->unref();
+            App::DocumentObject* root = part.getObject();
+            for (App::DocumentObject* obj : root->getSubObjectList(part.getSubName().c_str())) {
+                if (auto* link = freecad_cast<ViewProviderLink*>(doc.getViewProvider(obj))) {
+                    link->reapplyColorOverrides();
+                }
+            }
+        }
+    }
+
+    // The visible parts under obj, at sub from root: an object with faces (a Part feature, a
+    // PartDesign body) is one part; groups, App::Part and links are opened. Sketches, datums
+    // and meshes have no faces to colour.
+    static void collect(
+        App::DocumentObject* root,
+        const std::string& sub,
+        int depth,
+        std::vector<App::SubObjectT>& parts
+    )
+    {
+        constexpr int maxDepth = 64;  // a link that leads back to itself
+        App::DocumentObject* obj = sub.empty() ? root : root->getSubObject(sub.c_str());
+        if (!obj || depth > maxDepth) {
+            return;
+        }
+        App::DocumentObject* linked = obj->getLinkedObject(true);
+        if (!linked) {
+            linked = obj;
+        }
+        if (auto* geo = freecad_cast<App::GeoFeature*>(linked)) {
+            if (const auto* prop = geo->getPropertyOfGeometry()) {
+                const Data::ComplexGeoData* data = prop->getComplexData();
+                if (data && data->countSubElements("Face") > 0) {
+                    parts.emplace_back(root, sub.c_str());
+                }
+                return;
+            }
+        }
+        if (!linked->hasExtension(App::GroupExtension::getExtensionClassTypeId())
+            && !obj->hasExtension(App::LinkBaseExtension::getExtensionClassTypeId())) {
+            return;
+        }
+        for (const std::string& child : obj->getSubObjects(App::DocumentObject::GS_SELECT)) {
+            App::DocumentObject* childObj = obj->getSubObject(child.c_str());
+            if (!childObj) {
+                continue;
+            }
+            std::string element = child;
+            if (!element.empty() && element.back() == '.') {
+                element.pop_back();
+            }
+            const int visible = obj->isElementVisible(element.c_str());
+            if (visible == 0 || (visible < 0 && !childObj->Visibility.getValue())) {
+                continue;
+            }
+            collect(root, sub + child, depth + 1, parts);
+        }
+    }
+
+    // Hues a golden angle apart, so neighbours in the tree differ the most
+    static Base::Color colorOf(std::size_t k)
+    {
+        constexpr double goldenRatio = 0.618033988749895;
+        const double hue = std::fmod(0.05 + goldenRatio * static_cast<double>(k), 1.0);
+        const QColor color = QColor::fromHsvF(static_cast<float>(hue), 0.55F, 0.92F);
+        return Base::Color(color.redF(), color.greenF(), color.blueF());
+    }
+
+    std::map<const Gui::Document*, State> states;
+    fastsignals::scoped_connection deleted;
+};
+}  // namespace
+
+DEF_STD_CMD_AC(StdCmdPartColors)
+
+StdCmdPartColors::StdCmdPartColors()
+    : Command("Std_PartColors")
+{
+    sGroup = "View";
+    sMenuText = QT_TR_NOOP("&Part Colors");
+    sToolTipText = QT_TR_NOOP(
+        "Shows each visible part in a color of its own; the document and its colors are not changed"
+    );
+    sWhatsThis = "Std_PartColors";
+    sStatusTip = sToolTipText;
+    sPixmap = "Std_PartColors";
+    eType = Alter3DView;
+}
+
+void StdCmdPartColors::activated(int iMsg)
+{
+    if (Gui::Document* doc = Application::Instance->activeDocument()) {
+        PartColors::instance().setOn(doc, iMsg != 0);
+    }
+}
+
+bool StdCmdPartColors::isActive()
+{
+    Gui::Document* doc = Application::Instance->activeDocument();
+    if (_pcAction) {
+        const bool on = doc && PartColors::instance().isOn(doc);
+        if (_pcAction->isChecked() != on) {
+            _pcAction->setBlockedChecked(on);
+        }
+    }
+    return doc != nullptr;
+}
+
+Action* StdCmdPartColors::createAction()
+{
+    Action* pcAction = Command::createAction();
+    pcAction->setCheckable(true);
+    return pcAction;
+}
+
+//===========================================================================
 // Std_DockOverlayAll
 //===========================================================================
 
@@ -4598,6 +4863,7 @@ void CreateViewStdCommands()
     rcCmdMgr.addCommand(new StdCmdToggleNavigation());
     rcCmdMgr.addCommand(new StdCmdAxisCross());
     rcCmdMgr.addCommand(new StdCmdSelBoundingBox());
+    rcCmdMgr.addCommand(new StdCmdPartColors());
     rcCmdMgr.addCommand(new StdCmdTreeViewActions());
     rcCmdMgr.addCommand(new StdCmdDockOverlay());
     rcCmdMgr.addCommand(new StdCmdToggleBottomPanels());

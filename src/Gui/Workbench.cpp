@@ -756,7 +756,7 @@ MenuItem* StdWorkbench::setupMenuBar() const
     auto visu = new MenuItem;
     visu->setCommand("V&isibility");
     *visu << "Std_ToggleVisibility" << "Std_ShowSelection" << "Std_HideSelection"
-          << "Std_IsolateSelection" << "Std_SelectVisibleObjects"
+          << "Std_IsolateSelection" << "Std_SelectVisibleObjects" << "Std_PartColors"
           << "Separator" << "Std_ToggleObjects" << "Std_ShowObjects" << "Std_HideObjects"
           << "Separator" << "Std_ToggleSelectability";
 
