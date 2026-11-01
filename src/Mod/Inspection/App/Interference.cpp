@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <mutex>
 #include <set>
@@ -50,7 +51,7 @@
 #include <Base/Exception.h>
 #include <Base/Sequencer.h>
 #include <Mod/Mesh/App/MeshFeature.h>
-#include <Mod/Part/App/FCBRepAlgoAPI_BooleanOperation.h>
+#include <Mod/Part/App/FuzzyHelper.h>
 #include <Mod/Part/App/PartFeature.h>
 
 #include "Interference.h"
@@ -228,7 +229,15 @@ InterferenceResult measure(
     common.SetArguments(arguments);
     common.SetTools(tools);
     common.SetNonDestructive(Standard_True);
-    FCBRepAlgoAPIHelper::setAutoFuzzy(&common);
+    // The fuzzy value FCBRepAlgoAPIHelper::setAutoFuzzy() would give; that helper is not
+    // exported from Part on Windows
+    Bnd_Box bounds;
+    BRepBndLib::Add(a.shape, bounds);
+    BRepBndLib::Add(b.shape, bounds);
+    common.SetFuzzyValue(
+        Part::FuzzyHelper::getBooleanFuzzy() * std::sqrt(bounds.SquareExtent())
+        * Precision::Confusion()
+    );
     common.Build();
     if (!common.IsDone()) {
         return unchecked(first, second, "the parts could not be intersected");
