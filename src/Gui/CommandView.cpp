@@ -4012,7 +4012,7 @@ private:
         }
     }
 
-    // Back to the appearance. The action also clears what links set on the same paths, so
+    // Back to the appearance. The action may also clear what links set on the same paths, so
     // links on the way apply their own colours again.
     static void clear(Gui::Document& doc, const State& state)
     {
