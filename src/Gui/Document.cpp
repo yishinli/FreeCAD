@@ -56,6 +56,7 @@
 
 #include "Document.h"
 #include "DocumentPy.h"
+#include "DocumentWatcher.h"
 #include "Application.h"
 #include "Command.h"
 #include "Control.h"
@@ -1659,6 +1660,42 @@ bool Document::warnIfOlderVersion()
     return true;
 }
 
+// Another program rewrote some of these files since they were opened or saved here: saving
+// would silently drop those versions
+static bool confirmOverwrite(const std::vector<App::Document*>& docs)
+{
+    QStringList changed;
+    for (auto doc : docs) {
+        // Nothing is saved over a file opened read-only, so there is nothing to ask
+        if (doc->isSaved() && !doc->isReadOnlyFile()
+            && DocumentWatcher::instance()->changedOnDisk(doc)) {
+            changed << QFileInfo(QString::fromUtf8(doc->FileName.getValue())).fileName();
+        }
+    }
+    if (changed.isEmpty()) {
+        return true;
+    }
+    auto hDoc = App::GetApplication().GetParameterGroupByPath(
+        "User parameter:BaseApp/Preferences/Document"
+    );
+    QString text = QObject::tr(
+        "%1 was changed on disk by another program since it was opened here. "
+        "Saving overwrites that version."
+    );
+    text = text.arg(changed.join(QStringLiteral(", ")));
+    if (hDoc->GetBool("CreateBackupFiles", true) && hDoc->GetBool("BackupPolicy", true)) {
+        text += QLatin1Char(' ') + QObject::tr("That version is kept as a backup file beside it.");
+    }
+    const int ret = QMessageBox::warning(
+        getMainWindow(),
+        QObject::tr("File changed on disk"),
+        text,
+        QMessageBox::Save | QMessageBox::Cancel,
+        QMessageBox::Cancel
+    );
+    return ret == QMessageBox::Save;
+}
+
 /// Save the document
 bool Document::save()
 {
@@ -1734,6 +1771,10 @@ bool Document::save()
             }
 
             if (!checkCanonicalPath(dmap)) {
+                return false;
+            }
+
+            if (!confirmOverwrite(docs)) {
                 return false;
             }
 
@@ -1875,6 +1916,14 @@ void Document::saveAll()
     }
 
     if (!checkCanonicalPath(dmap)) {
+        return;
+    }
+
+    std::vector<App::Document*> saving;
+    for (auto& [doc, mustExecute] : dmap) {
+        saving.push_back(doc);
+    }
+    if (!confirmOverwrite(saving)) {
         return;
     }
 
