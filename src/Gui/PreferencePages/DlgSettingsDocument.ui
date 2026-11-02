@@ -116,6 +116,45 @@
         </property>
        </widget>
       </item>
+      <item row="8" column="0">
+       <layout class="QHBoxLayout" name="externalChangeLayout">
+        <item>
+         <widget class="QLabel" name="labelExternalChange">
+          <property name="text">
+           <string>When a file is changed by another program</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="Gui::PrefComboBox" name="prefExternalChange">
+          <property name="toolTip">
+           <string>What to do when the file of an open document is rewritten outside FreeCAD</string>
+          </property>
+          <property name="prefEntry" stdset="0">
+           <cstring>ExternalChange</cstring>
+          </property>
+          <property name="prefPath" stdset="0">
+           <cstring>Document</cstring>
+          </property>
+          <item>
+           <property name="text">
+            <string>Offer to reload it</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Reload it when nothing is unsaved</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Do nothing</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+       </layout>
+      </item>
       <item row="6" column="0">
        <widget class="Gui::PrefCheckBox" name="prefCanAbortRecompute">
         <property name="toolTip">

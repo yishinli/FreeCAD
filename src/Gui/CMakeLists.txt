@@ -483,6 +483,7 @@ SET(Dialog_CPP_SRCS
     DownloadItem.cpp
     DownloadManager.cpp
     DocumentRecovery.cpp
+    DocumentWatcher.cpp
     TaskElementColors.cpp
     TaskExplodedView.cpp
     VisibleParts.cpp
@@ -529,6 +530,7 @@ SET(Dialog_HPP_SRCS
     DownloadItem.h
     DownloadManager.h
     DocumentRecovery.h
+    DocumentWatcher.h
     TaskElementColors.h
     TaskExplodedView.h
     VisibleParts.h

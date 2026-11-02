@@ -47,6 +47,7 @@
 #include "PreferencePackManager.h"
 #include "Application.h"
 #include "AutoSaver.h"
+#include "DocumentWatcher.h"
 #include "Dialogs/DlgCheckableMessageBox.h"
 #include "FileDialog.h"
 #include "GuiApplication.h"
@@ -213,6 +214,7 @@ void StartupPostProcess::execute()
     setWindowTitle();
     setProcessMessages();
     setAutoSaving();
+    watchDocuments();
     checkQtSvgImageFormatSupport();
     setToolBarIconSize();
     setWheelEventFilter();
@@ -257,6 +259,11 @@ void StartupPostProcess::setAutoSaving()
 
     AutoSaver::instance()->setTimeout(timeout * 60000);  // NOLINT
     AutoSaver::instance()->setCompressed(hDocGrp->GetBool("AutoSaveCompressed", true));
+}
+
+void StartupPostProcess::watchDocuments()
+{
+    DocumentWatcher::instance();
 }
 
 void StartupPostProcess::checkQtSvgImageFormatSupport()
