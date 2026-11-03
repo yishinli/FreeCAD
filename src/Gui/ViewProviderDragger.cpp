@@ -115,9 +115,16 @@ void ViewProviderDragger::onChanged(const App::Property* property)
         updateDraggerPosition();
     }
     else if (property == &ShowPlacement || property == &Visibility) {
-        pcPlacement->whichChild = (ShowPlacement.getValue() && Visibility.getValue())
-            ? SO_SWITCH_ALL
-            : SO_SWITCH_NONE;
+        const bool show = ShowPlacement.getValue() && Visibility.getValue();
+        if (show && pcPlacement->getNumChildren() == 0) {
+            auto* pcAxisCrossKit = new Gui::SoFCPlacementIndicatorKit();
+
+            auto* pcAnnotation = new So3DAnnotation();
+            pcAnnotation->addChild(pcAxisCrossKit);
+
+            pcPlacement->addChild(pcAnnotation);
+        }
+        pcPlacement->whichChild = show ? SO_SWITCH_ALL : SO_SWITCH_NONE;
     }
 
     ViewProviderDocumentObject::onChanged(property);
@@ -481,14 +488,9 @@ void ViewProviderDragger::attach(App::DocumentObject* pcObject)
 {
     ViewProviderDocumentObject::attach(pcObject);
 
+    // The indicator itself is made in onChanged() when it is first shown: it is off by default,
+    // and building one for each of the thousands of objects of an assembly takes a second.
     getOrCreateAnnotation()->addChild(pcPlacement);
-
-    auto* pcAxisCrossKit = new Gui::SoFCPlacementIndicatorKit();
-
-    auto* pcAnnotation = new So3DAnnotation();
-    pcAnnotation->addChild(pcAxisCrossKit);
-
-    pcPlacement->addChild(pcAnnotation);
 }
 
 void ViewProviderDragger::updateDraggerPosition()
