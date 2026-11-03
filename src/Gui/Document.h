@@ -189,6 +189,8 @@ public:
     /// Observer message from the App doc
     void setModified(bool);
     bool isModified() const;
+    /// Whether the last restore read a GuiDocument.xml; without one the view is fit to the shapes
+    bool restoredGuiDocument() const;
 
     /// getter-setter for workbench name
     void setWorkbench(const std::string& name);
