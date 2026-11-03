@@ -321,6 +321,48 @@ void Material::setType(MaterialType MatType)
 
 App::Material Material::getDefaultAppearance()
 {
+    // Restoring a document builds a view provider for each of its objects, and each asks for
+    // this: reading the seven preferences costs more than the rest of building a datum's view
+    // provider. Keep the result while documents are restored, starting again for each one and
+    // whenever a preference changes; outside a restore it is read each time, as before.
+    static App::Material cached;
+    static bool cachedRandomColor = false;
+    static bool cacheValid = false;
+    static const bool connected = [] {
+        auto drop = [](auto&&...) {
+            cacheValid = false;
+        };
+        App::GetApplication().GetUserParameter().signalParamChanged.connect(drop);
+        App::GetApplication().signalStartRestoreDocument.connect(drop);
+        return true;
+    }();
+    (void)connected;
+    const bool restoring = App::GetApplication().isRestoring();
+    if (!restoring) {
+        cacheValid = false;
+    }
+
+    auto intRandom = [](int min, int max) -> int {
+        static std::random_device rd;
+        static std::mt19937 generator(rd());
+        std::uniform_int_distribution<int> distribution(min, max);
+        return distribution(generator);
+    };
+    auto randomDiffuse = [&intRandom](App::Material& mat) {
+        float red = static_cast<float>(intRandom(0, 255)) / 255.0F;
+        float green = static_cast<float>(intRandom(0, 255)) / 255.0F;
+        float blue = static_cast<float>(intRandom(0, 255)) / 255.0F;
+        mat.diffuseColor = Base::Color(red, green, blue);
+    };
+
+    if (restoring && cacheValid) {
+        App::Material mat = cached;
+        if (cachedRandomColor) {
+            randomDiffuse(mat);
+        }
+        return mat;
+    }
+
     ParameterGrp::handle hGrp =
         App::GetApplication().GetParameterGroupByPath("User parameter:BaseApp/Preferences/View");
 
@@ -329,13 +371,6 @@ App::Material Material::getDefaultAppearance()
         packed = hGrp->GetUnsigned(parameter, packed);
         color.setPackedRGB(packed);
     };
-    auto intRandom = [](int min, int max) -> int {
-        static std::random_device rd;
-        static std::mt19937 generator(rd());
-        std::uniform_int_distribution<int> distribution(min, max);
-        return distribution(generator);
-    };
-
     App::Material mat(App::Material::DEFAULT);
     mat.transparency = Base::fromPercent(hGrp->GetInt("DefaultShapeTransparency", 0));
     long shininess = Base::toPercent(mat.shininess);
@@ -345,13 +380,7 @@ App::Material Material::getDefaultAppearance()
     bool randomColor = hGrp->GetBool("RandomColor", false);
 
     // diffuse color
-    if (randomColor) {
-        float red = static_cast<float>(intRandom(0, 255)) / 255.0F;
-        float green = static_cast<float>(intRandom(0, 255)) / 255.0F;
-        float blue = static_cast<float>(intRandom(0, 255)) / 255.0F;
-        mat.diffuseColor = Base::Color(red, green, blue);
-    }
-    else {
+    if (!randomColor) {
         // Base::Color = (204, 204, 230) = 3435980543UL
         getColor("DefaultShapeColor", mat.diffuseColor);
     }
@@ -360,6 +389,14 @@ App::Material Material::getDefaultAppearance()
     getColor("DefaultEmissiveColor", mat.emissiveColor);
     getColor("DefaultSpecularColor", mat.specularColor);
 
+    if (restoring) {
+        cached = mat;
+        cachedRandomColor = randomColor;
+        cacheValid = true;
+    }
+    if (randomColor) {
+        randomDiffuse(mat);
+    }
     return mat;
 }
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
