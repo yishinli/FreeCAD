@@ -1,4 +1,4 @@
-# Shortcut style close to SolidWorks (and SolidCraft's defaults).
+# Shortcut style close to SolidWorks.
 # One "command = shortcut" per line; an empty shortcut removes the command's own.
 # Commands not listed keep FreeCAD's shortcuts.
 

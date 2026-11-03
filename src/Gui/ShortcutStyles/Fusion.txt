@@ -1,4 +1,4 @@
-# Shortcut style close to Autodesk Fusion (and SolidCraft's defaults), for use with SolidWorks
+# Shortcut style close to Autodesk Fusion, for use with SolidWorks
 # navigation. One "command = shortcut" per line; an empty shortcut removes the command's own.
 # Commands not listed keep FreeCAD's shortcuts.
 
