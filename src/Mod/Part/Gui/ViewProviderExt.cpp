@@ -30,6 +30,8 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <gp_Trsf.hxx>
+#include <OSD.hxx>
+#include <OSD_Parallel.hxx>
 #include <Precision.hxx>
 #include <Poly_Array1OfTriangle.hxx>
 #include <Poly_Polygon3D.hxx>
@@ -50,7 +52,14 @@
 
 #include <QAction>
 #include <QMenu>
+#include <QTimer>
+#include <algorithm>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 #include <Inventor/SoPickedPoint.h>
 #include <Inventor/details/SoFaceDetail.h>
@@ -68,6 +77,7 @@
 #include <Inventor/nodes/SoShapeHints.h>
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <fastsignals/connection.h>
 
 #include <App/Application.h>
 #include <App/Document.h>
@@ -76,12 +86,15 @@
 #include <Base/TimeInfo.h>
 #include <Base/Tools.h>
 
+#include <Gui/Application.h>
 #include <Gui/BitmapFactory.h>
 #include <Gui/Control.h>
+#include <Gui/Document.h>
 #include <Gui/Selection/SoFCSelectionAction.h>
 #include <Gui/Selection/SoFCUnifiedSelection.h>
 #include <Gui/ViewParams.h>
 #include <Gui/Utilities.h>
+#include <Gui/View3DInventor.h>
 
 #include <Mod/Part/App/ShapeMapHasher.h>
 #include <Mod/Part/App/Tools.h>
@@ -99,6 +112,336 @@ FC_LOG_LEVEL_INIT("Part", true, true)
 using namespace PartGui;
 
 PROPERTY_SOURCE(PartGui::ViewProviderPartExt, Gui::ViewProviderGeometryObject)
+
+namespace
+{
+
+/// Sets of shapes that share a face or an edge, directly or through another
+/// shape in the same set, by index. Every index appears in exactly one set.
+/// (A copy of Part::SectionCap::groupBySharedGeometry(), which this branch lacks.)
+std::vector<std::vector<std::size_t>> groupBySharedGeometry(const std::vector<TopoDS_Shape>& shapes)
+{
+    // Union-find over the shapes, joined through the faces and edges they hold.
+    std::vector<std::size_t> root(shapes.size());
+    for (std::size_t i = 0; i < root.size(); ++i) {
+        root[i] = i;
+    }
+    auto find = [&root](std::size_t i) {
+        while (root[i] != i) {
+            root[i] = root[root[i]];
+            i = root[i];
+        }
+        return i;
+    };
+    std::unordered_map<const TopoDS_TShape*, std::size_t> owner;
+    for (std::size_t i = 0; i < shapes.size(); ++i) {
+        if (shapes[i].IsNull()) {
+            continue;
+        }
+        for (const TopAbs_ShapeEnum type : {TopAbs_FACE, TopAbs_EDGE}) {
+            for (TopExp_Explorer it(shapes[i], type); it.More(); it.Next()) {
+                const auto [found, inserted] = owner.emplace(it.Current().TShape().get(), i);
+                if (!inserted) {
+                    root[find(i)] = find(found->second);
+                }
+            }
+        }
+    }
+
+    std::unordered_map<std::size_t, std::size_t> groupOf;
+    std::vector<std::vector<std::size_t>> groups;
+    for (std::size_t i = 0; i < shapes.size(); ++i) {
+        const auto [found, inserted] = groupOf.emplace(find(i), groups.size());
+        if (inserted) {
+            groups.emplace_back();
+        }
+        groups[found->second].push_back(i);
+    }
+    return groups;
+}
+
+/// Mesh the shape for setupCoinGeometry(). The mesh is kept on the faces and edges of the shape;
+/// inParallel spreads the faces of this one shape over threads.
+void meshForView(TopoDS_Shape shape, double deviation, double angularDeflection, bool inParallel)
+{
+    // calculating the deflection value
+    Standard_Real deflection = Part::Tools::getDeflection(shape, deviation);
+
+    // Since OCCT 7.6 a value of equal 0 is not allowed any more, this can happen if a single
+    // vertex should be displayed.
+    if (deflection < gp::Resolution()) {
+        deflection = Precision::Confusion();
+    }
+
+    // For very big objects the computed deflection can become very high and thus leads to a
+    // useless tessellation. To avoid this the upper limit is set to 20.0 See also forum:
+    // https://forum.freecad.org/viewtopic.php?t=77521
+    // deflection = std::min(deflection, 20.0);
+
+    // create or use the mesh on the data structure
+    Standard_Real AngDeflectionRads = Base::toRadians(angularDeflection);
+
+    IMeshTools_Parameters meshParams;
+    meshParams.Deflection = deflection;
+    meshParams.Relative = Standard_False;
+    meshParams.Angle = AngDeflectionRads;
+    meshParams.InParallel = inParallel ? Standard_True : Standard_False;
+    meshParams.AllowQualityDecrease = Standard_True;
+
+    // Clear triangulation and PCurves from geometry which can slow down the process
+#if OCC_VERSION_HEX < 0x070600
+    BRepTools::Clean(shape);
+#else
+    BRepTools::Clean(shape, Standard_True);
+#endif
+
+    BRepMesh_IncrementalMesh(shape, meshParams);
+}
+
+}  // namespace
+
+namespace PartGui
+{
+
+/**
+ * Meshes the shapes of a document being opened all together once it is restored, many at a time,
+ * instead of each one as its view provider turns visible. The parts of a large assembly are
+ * small: meshing them one after another, each over all the cores, keeps most cores waiting.
+ *
+ * Shapes that share a face or an edge with another one waiting are meshed one after another as
+ * before, since the mesh of the one meshed last is the one they both keep.
+ */
+class MeshBatch
+{
+public:
+    /// Queue the view provider if its document is being restored; false to draw it now
+    static bool defer(ViewProviderPartExt* vp, bool show)
+    {
+        App::DocumentObject* obj = vp->getObject();
+        App::Document* doc = obj ? obj->getDocument() : nullptr;
+        if (!doc || !doc->testStatus(App::Document::Restoring)) {
+            return false;
+        }
+        connect();
+        if (!queued.insert(vp).second) {
+            for (auto& entries : queues) {
+                for (Entry& entry : entries.second) {
+                    if (entry.vp == vp) {
+                        entry.show = entry.show || show;
+                    }
+                }
+            }
+            return true;
+        }
+        queues[doc].push_back({vp, show});
+        // Pasting and merging restore objects into an open document without finishing a restore
+        if (!importWatch.contains(doc)) {
+            importWatch.emplace(
+                doc,
+                doc->signalFinishImportObjects.connect(
+                    [doc](const std::vector<App::DocumentObject*>&) { flush(doc); }
+                )
+            );
+        }
+        armTimer(0);
+        return true;
+    }
+
+    static void forget(ViewProviderPartExt* vp)
+    {
+        if (queued.erase(vp) == 0) {
+            return;
+        }
+        for (auto& entries : queues) {
+            std::erase_if(entries.second, [vp](const Entry& entry) { return entry.vp == vp; });
+        }
+    }
+
+private:
+    /// Restoring is left set when a restore throws, and restore() called by itself (revert,
+    /// reload) is not followed by signalFinishOpenDocument: draw whatever still waits once the
+    /// event loop runs again. Not while files are being opened, though: the progress bar runs
+    /// the event loop, and the restore's own flush is the one that fits the view.
+    static void armTimer(int msec)
+    {
+        if (timerArmed) {
+            return;
+        }
+        timerArmed = true;
+        QTimer::singleShot(msec, [] {
+            timerArmed = false;
+            if (App::GetApplication().isRestoring()) {
+                armTimer(100);
+            }
+            else {
+                flush(nullptr);
+            }
+        });
+    }
+
+    struct Entry
+    {
+        ViewProviderPartExt* vp;
+        bool show;  // turned visible, not only forced
+    };
+
+    static void connect()
+    {
+        static bool connected = false;
+        if (connected) {
+            return;
+        }
+        connected = true;
+        // Never disconnected: the application outlives every document.
+        App::GetApplication().signalFinishRestoreDocument.connect(
+            [](const App::Document& doc) { flush(&doc, true); }
+        );
+        App::GetApplication().signalFinishOpenDocument.connect([] { flush(nullptr); });
+        App::GetApplication().signalDeleteDocument.connect([](const App::Document& doc) {
+            auto it = queues.find(&doc);
+            if (it != queues.end()) {
+                for (const Entry& entry : it->second) {
+                    queued.erase(entry.vp);
+                }
+                queues.erase(it);
+            }
+            importWatch.erase(&doc);
+        });
+    }
+
+    /// Draw what waits for the document, or for every document. restored: the document has just
+    /// been restored, and is fit to the view if it had no GuiDocument.xml.
+    static void flush(const App::Document* doc, bool restored = false)
+    {
+        std::vector<Entry> entries;
+        for (auto it = queues.begin(); it != queues.end();) {
+            if (doc && it->first != doc) {
+                ++it;
+                continue;
+            }
+            entries.insert(entries.end(), it->second.begin(), it->second.end());
+            it = queues.erase(it);
+        }
+        for (const Entry& entry : entries) {
+            queued.erase(entry.vp);
+        }
+        // As onChanged(Visibility) and forceUpdate() would have drawn it
+        std::erase_if(entries, [](const Entry& entry) {
+            ViewProviderPartExt* vp = entry.vp;
+            return !vp->VisualTouched || !(vp->isUpdateForced() || vp->Visibility.getValue());
+        });
+        if (entries.empty()) {
+            return;
+        }
+
+        Base::TimeElapsed startTime;
+        std::vector<TopoDS_Shape> shapes;
+        shapes.reserve(entries.size());
+        for (const Entry& entry : entries) {
+            shapes.push_back(entry.vp->getRenderedShape().getShape());
+        }
+
+        // Alone in its group, largest first so a big one does not start last
+        std::vector<std::size_t> alone;
+        for (const auto& group : groupBySharedGeometry(shapes)) {
+            if (group.size() == 1 && !Part::Tools::isShapeEmpty(shapes[group.front()])) {
+                alone.push_back(group.front());
+            }
+        }
+        std::vector<std::size_t> faces(shapes.size(), 0);
+        for (const std::size_t i : alone) {
+            for (TopExp_Explorer it(shapes[i], TopAbs_FACE); it.More(); it.Next()) {
+                ++faces[i];
+            }
+        }
+        std::ranges::stable_sort(alone, std::ranges::greater {}, [&faces](std::size_t i) {
+            return faces[i];
+        });
+
+        std::vector<double> deviation(entries.size());
+        std::vector<double> angle(entries.size());
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            deviation[i] = entries[i].vp->Deviation.getValue();
+            angle[i] = entries[i].vp->AngularDeflection.getValue();
+        }
+
+        const OSD_SignalMode signalMode = OSD::SignalMode();
+        const bool floatingSignals = OSD::ToCatchFloatingSignals();
+        std::vector<char> meshed(entries.size(), 0);
+        OSD_Parallel::For(0, static_cast<int>(alone.size()), [&](int k) {
+            // Signal handling is per thread on Windows, and a TBB worker has none:
+            // without this an access violation in the mesher ends the process
+            // instead of reaching the catch below as a Standard_Failure.
+            OSD::SetThreadLocalSignal(signalMode, floatingSignals);
+            const std::size_t i = alone[static_cast<std::size_t>(k)];
+            try {
+                meshForView(shapes[i], deviation[i], angle[i], false);
+                meshed[i] = 1;
+            }
+            catch (...) {
+                // Meshed again by updateVisual(), which reports the error
+            }
+        });
+
+        // Restoring the view providers leaves their documents unmodified, and drawing what they
+        // restored does not change that, as when they were drawn during the restore
+        std::set<Gui::Document*> unmodified;
+        for (const Entry& entry : entries) {
+            auto guiDoc = Gui::Application::Instance->getDocument(entry.vp->getObject()->getDocument());
+            if (guiDoc && !guiDoc->isModified()) {
+                unmodified.insert(guiDoc);
+            }
+        }
+
+        int together = 0;
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            ViewProviderPartExt* vp = entries[i].vp;
+            if (meshed[i]) {
+                vp->premeshedShape = shapes[i];
+                vp->premeshedDeviation = deviation[i];
+                vp->premeshedAngle = angle[i];
+                ++together;
+            }
+            if (entries[i].show) {
+                vp->showVisual();
+            }
+            else {
+                vp->updateVisual();
+            }
+            vp->premeshedShape.Nullify();
+        }
+        for (Gui::Document* guiDoc : unmodified) {
+            guiDoc->setModified(false);
+        }
+        FC_LOG(
+            "Meshed " << entries.size() << " shapes after restoring, " << together
+                      << " of them together, in "
+                      << Base::TimeElapsed::diffTimeF(startTime, Base::TimeElapsed()) << " s"
+        );
+#ifdef __GLIBC__
+        // Each mesher thread leaves the memory it freed in its own glibc arena: give it back
+        malloc_trim(0);
+#endif
+        // Gui::Document fits the view in its own slot of the same signal, which may run before
+        // this one and so find nothing drawn yet
+        auto guiDoc = restored ? Gui::Application::Instance->getDocument(doc) : nullptr;
+        if (guiDoc && !guiDoc->restoredGuiDocument()) {
+            for (auto* mdiView : guiDoc->getMDIViews()) {
+                if (auto* view3D = freecad_cast<Gui::View3DInventor*>(mdiView)) {
+                    view3D->viewAll();
+                    break;
+                }
+            }
+        }
+    }
+
+    static inline std::map<const App::Document*, std::vector<Entry>> queues;
+    static inline std::unordered_set<ViewProviderPartExt*> queued;
+    static inline std::map<const App::Document*, fastsignals::scoped_connection> importWatch;
+    static inline bool timerArmed = false;
+};
+
+}  // namespace PartGui
 
 
 //**************************************************************************
@@ -280,6 +623,7 @@ ViewProviderPartExt::ViewProviderPartExt()
 
 ViewProviderPartExt::~ViewProviderPartExt()
 {
+    MeshBatch::forget(this);
     pcFaceBind->unref();
     pcLineBind->unref();
     pcPointBind->unref();
@@ -437,22 +781,29 @@ void ViewProviderPartExt::onChanged(const App::Property* prop)
     else {
         // if the object was invisible and has been changed, recreate the visual
         if (prop == &Visibility && (isUpdateForced() || Visibility.getValue()) && VisualTouched) {
-            updateVisual();
-            // updateVisual() may not be triggered by any change (e.g.
-            // triggered by an external object through forceUpdate()). And
-            // since ShapeAppearance is not changed here either, do not falsely set
-            // the document modified status
-            Base::ObjectStatusLocker<App::Property::Status, App::Property> guard(
-                App::Property::NoModify,
-                &ShapeAppearance
-            );
-            // The material has to be checked again (#0001736)
-            onChanged(&ShapeAppearance);
-            onChanged(&ShowPlacement);
+            if (!MeshBatch::defer(this, true)) {
+                showVisual();
+            }
         }
     }
 
     ViewProviderGeometryObject::onChanged(prop);
+}
+
+void ViewProviderPartExt::showVisual()
+{
+    updateVisual();
+    // updateVisual() may not be triggered by any change (e.g.
+    // triggered by an external object through forceUpdate()). And
+    // since ShapeAppearance is not changed here either, do not falsely set
+    // the document modified status
+    Base::ObjectStatusLocker<App::Property::Status, App::Property> guard(
+        App::Property::NoModify,
+        &ShapeAppearance
+    );
+    // The material has to be checked again (#0001736)
+    onChanged(&ShapeAppearance);
+    onChanged(&ShowPlacement);
 }
 
 bool ViewProviderPartExt::allowOverride(const App::DocumentObject&) const
@@ -1058,7 +1409,8 @@ void ViewProviderPartExt::setupCoinGeometry(
     SoBrepPointSet* nodeset,
     double deviation,
     double angularDeflection,
-    bool normalsFromUV
+    bool normalsFromUV,
+    bool meshed
 )
 {
     if (Part::Tools::isShapeEmpty(shape)) {
@@ -1081,38 +1433,9 @@ void ViewProviderPartExt::setupCoinGeometry(
 
     std::set<int> faceEdges;
 
-    // calculating the deflection value
-    Standard_Real deflection = Part::Tools::getDeflection(shape, deviation);
-
-    // Since OCCT 7.6 a value of equal 0 is not allowed any more, this can happen if a single
-    // vertex should be displayed.
-    if (deflection < gp::Resolution()) {
-        deflection = Precision::Confusion();
+    if (!meshed) {
+        meshForView(shape, deviation, angularDeflection, true);
     }
-
-    // For very big objects the computed deflection can become very high and thus leads to a
-    // useless tessellation. To avoid this the upper limit is set to 20.0 See also forum:
-    // https://forum.freecad.org/viewtopic.php?t=77521
-    // deflection = std::min(deflection, 20.0);
-
-    // create or use the mesh on the data structure
-    Standard_Real AngDeflectionRads = Base::toRadians(angularDeflection);
-
-    IMeshTools_Parameters meshParams;
-    meshParams.Deflection = deflection;
-    meshParams.Relative = Standard_False;
-    meshParams.Angle = AngDeflectionRads;
-    meshParams.InParallel = Standard_True;
-    meshParams.AllowQualityDecrease = Standard_True;
-
-    // Clear triangulation and PCurves from geometry which can slow down the process
-#if OCC_VERSION_HEX < 0x070600
-    BRepTools::Clean(shape);
-#else
-    BRepTools::Clean(shape, Standard_True);
-#endif
-
-    BRepMesh_IncrementalMesh(shape, meshParams);
 
     // We must reset the location here because the transformation data
     // are set in the placement property
@@ -1544,6 +1867,12 @@ void ViewProviderPartExt::updateVisual()
     haction.apply(this->lineset);
     haction.apply(this->nodeset);
 
+    // A partner: getRenderedShape() makes a new location each time, and nothing runs between
+    // MeshBatch and here that could move the shape
+    const bool meshed = !premeshedShape.IsNull() && premeshedShape.IsPartner(shape)
+        && premeshedDeviation == Deviation.getValue()
+        && premeshedAngle == AngularDeflection.getValue();
+
     try {
         setupCoinGeometry(
             shape,
@@ -1554,7 +1883,8 @@ void ViewProviderPartExt::updateVisual()
             nodeset,
             Deviation.getValue(),
             AngularDeflection.getValue(),
-            NormalsFromUV
+            NormalsFromUV,
+            meshed
         );
 
         lastRenderedShape = shape;
@@ -1581,7 +1911,7 @@ void ViewProviderPartExt::forceUpdate(bool enable)
 {
     if (enable) {
         if (++forceUpdateCount == 1) {
-            if (!isShow() && VisualTouched) {
+            if (!isShow() && VisualTouched && !MeshBatch::defer(this, false)) {
                 updateVisual();
             }
         }

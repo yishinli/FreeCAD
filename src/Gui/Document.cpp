@@ -1341,6 +1341,10 @@ bool Document::isModified() const
 {
     return d->_isModified;
 }
+bool Document::restoredGuiDocument() const
+{
+    return d->_restoredGuiDocument;
+}
 void Document::setWorkbench(const std::string& name)
 {
     d->_workbenchName = name;

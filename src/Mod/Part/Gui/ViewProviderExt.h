@@ -189,7 +189,8 @@ public:
         SoBrepPointSet* nodeset,
         double deviation,
         double angularDeflection,
-        bool normalsFromUV = false
+        bool normalsFromUV = false,
+        bool meshed = false  ///< the shape already holds the mesh for deviation and angle
     );
 
     static void setupCoinGeometry(
@@ -210,6 +211,8 @@ protected:
     void onChanged(const App::Property* prop) override;
     bool loadParameter();
     void updateVisual();
+    /// updateVisual() for an object turning visible, and the materials after it
+    void showVisual();
     void handleChangedPropertyName(
         Base::XMLReader& reader,
         const char* TypeName,
@@ -253,6 +256,13 @@ private:
 
     // shape that was last rendered so if it does not change we don't re-render it without need
     TopoDS_Shape lastRenderedShape;
+
+    // meshed by MeshBatch for the next updateVisual(), with the Deviation and AngularDeflection used
+    TopoDS_Shape premeshedShape;
+    double premeshedDeviation = 0.0;
+    double premeshedAngle = 0.0;
+
+    friend class MeshBatch;
 };
 
 }  // namespace PartGui
