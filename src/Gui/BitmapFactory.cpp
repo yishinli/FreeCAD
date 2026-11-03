@@ -505,12 +505,31 @@ QPixmap BitmapFactoryInst::pixmapFromSvg(
 {
     static qreal dpr = getMaximumDPR();
 
+    // An icon of FreeCAD's own, from the icon paths, the theme or the resources, without a color
+    // mapping and at icon size, only depends on its name and size. Keep it, so that a tree of
+    // thousands of links does not read and render the same overlay for each of them. A file of
+    // the user's (an image plane) is read again each time: it may have changed, and may be large.
+    constexpr qreal maxCachedSize = 128;
+    std::string cacheKey;
+    if (name && colorMapping.empty() && size.width() <= maxCachedSize
+        && size.height() <= maxCachedSize) {
+        cacheKey = std::string("svg:") + name + ':' + std::to_string(size.width()) + 'x'
+            + std::to_string(size.height());
+        auto it = d->xpmCache.find(cacheKey);
+        if (it != d->xpmCache.end()) {
+            return it.value();
+        }
+    }
+
     // If an absolute path is given
     QPixmap icon;
     QString iconPath;
     QString fn = QString::fromUtf8(name);
     if (QFile(fn).exists()) {
         iconPath = fn;
+        if (!fn.startsWith(QLatin1String(":/"))) {
+            cacheKey.clear();
+        }
     }
 
     if (iconPath.isEmpty() && d->externalThemeEnabled && d->preferExternal) {
@@ -547,6 +566,9 @@ QPixmap BitmapFactoryInst::pixmapFromSvg(
 
     if (!icon.isNull()) {
         icon.setDevicePixelRatio(dpr);
+        if (!cacheKey.empty()) {
+            d->xpmCache[cacheKey] = icon;
+        }
     }
 
     return icon;
