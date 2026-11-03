@@ -1523,6 +1523,10 @@ void ViewProviderPartExt::setupCoinGeometry(
     for (int i = 0; i < numNorms; i++) {
         norms[i] = SbVec3f(0.0, 0.0, 0.0);
     }
+    // and the points too: nodes no triangle or edge uses are never written below
+    for (int i = 0; i < numNodes; i++) {
+        verts[i] = SbVec3f(0.0, 0.0, 0.0);
+    }
 
     int ii = 0, faceNodeOffset = 0, faceTriaOffset = 0;
     for (int i = 1; i <= faceMap.Extent(); i++, ii++) {
