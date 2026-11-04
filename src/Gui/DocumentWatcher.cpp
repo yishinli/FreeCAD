@@ -21,6 +21,15 @@
 
 #include <algorithm>
 #include <set>
+#include <vector>
+
+#include <FCConfig.h>
+
+#ifdef FC_OS_WIN32
+# include <windows.h>
+# include <fcntl.h>
+# include <io.h>
+#endif
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -153,8 +162,8 @@ FileSignature Gui::readFileSignature(const QString& path)
     if (sig.size < eocdSize) {
         return sig;
     }
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
+    QFile file;
+    if (!openSharedForReading(file, path)) {
         return sig;
     }
 
@@ -213,6 +222,92 @@ FileSignature Gui::readFileSignature(const QString& path)
     sig.digest = digest;
     sig.complete = document;
     return sig;
+}
+
+#ifdef FC_OS_WIN32
+namespace
+{
+
+# ifndef FILE_SUPPORTS_POSIX_UNLINK_RENAME
+#  define FILE_SUPPORTS_POSIX_UNLINK_RENAME 0x00000400
+# endif
+
+HANDLE openForReading(const wchar_t* path, DWORD share)
+{
+    return CreateFileW(path, GENERIC_READ, share, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
+}  // namespace
+#endif
+
+bool Gui::openSharedForReading(QFile& file, const QString& path)
+{
+#ifdef FC_OS_WIN32
+    const QString native = QDir::toNativeSeparators(path);
+    const auto name = reinterpret_cast<const wchar_t*>(native.utf16());
+    HANDLE handle = openForReading(name, FILE_SHARE_READ | FILE_SHARE_WRITE);
+    // Share delete only where a delete frees the name at once (NTFS). On an SMB share or FAT the
+    // name stays taken while the file is open here: a save with backups off deletes the file,
+    // cannot rename the new one in, and the old one is gone once closed here. There the delete is
+    // refused, as Qt does, and the save fails with the file kept.
+    DWORD flags = 0;
+    if (handle != INVALID_HANDLE_VALUE
+        && GetVolumeInformationByHandleW(handle, nullptr, 0, nullptr, nullptr, &flags, nullptr, 0)
+        && (flags & FILE_SUPPORTS_POSIX_UNLINK_RENAME)) {
+        HANDLE shared = openForReading(name, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+        if (shared != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle);
+            handle = shared;
+        }
+    }
+    if (handle != INVALID_HANDLE_VALUE) {
+        // The descriptor is made in this CRT and read and closed in Qt's: one shared ucrtbase
+        const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDONLY | _O_BINARY);
+        if (fd < 0) {
+            CloseHandle(handle);
+        }
+        else if (file.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+            return true;
+        }
+        else {
+            _close(fd);
+        }
+    }
+    // A path CreateFileW does not take (too long without the \\?\ prefix): as Qt opens it
+#endif
+    file.setFileName(path);
+    return file.open(QIODevice::ReadOnly);
+}
+
+bool Gui::copySharedFile(const QString& source, const QString& target)
+{
+    QFile in;
+    if (!openSharedForReading(in, source)) {
+        return false;
+    }
+    QFile out(target);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return false;
+    }
+    std::vector<char> buffer(1 << 20);
+    bool ok = true;
+    for (;;) {
+        const qint64 count = in.read(buffer.data(), qint64(buffer.size()));
+        if (count <= 0) {
+            ok = count == 0;
+            break;
+        }
+        if (out.write(buffer.data(), count) != count) {
+            ok = false;
+            break;
+        }
+    }
+    ok = out.flush() && ok;
+    out.close();
+    if (!ok) {
+        out.remove();
+    }
+    return ok;
 }
 
 namespace Gui
@@ -976,7 +1071,7 @@ void DocumentWatcher::copyNext(std::vector<std::string> pending)
         for (int attempt = 0; attempt < 3; ++attempt) {
             const FileSignature before = statFile(source);
             QFile::remove(target);
-            if (before.modified < 0 || !QFile::copy(source, target)) {
+            if (before.modified < 0 || !copySharedFile(source, target)) {
                 error = DocumentWatcher::tr("The file cannot be read.");
                 continue;
             }

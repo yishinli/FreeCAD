@@ -2,7 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <system_error>
+
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <App/Application.h>
@@ -114,4 +118,58 @@ TEST_F(DocumentWatcherSignature, OtherFiles)
     const Gui::FileSignature missing = Gui::readFileSignature(dir.filePath(QStringLiteral("none")));
     EXPECT_EQ(missing.modified, -1);
     EXPECT_FALSE(missing.complete);
+}
+
+// FreeCAD's save never renames over the old file: it renames it away (backups on) or deletes
+// it (backups off), then renames the new one in. On Windows a rename over a file that is open
+// fails, however it was opened.
+TEST_F(DocumentWatcherSignature, SaveWithBackupWhileOpen)
+{
+    QFile original(path);
+    ASSERT_TRUE(original.open(QIODevice::ReadOnly));
+    const QByteArray before = original.readAll();
+    original.close();
+
+    QFile file;
+    ASSERT_TRUE(Gui::openSharedForReading(file, path));
+    const QString other = copyTo(QStringLiteral("other.FCStd"), 100);
+    const QString backup = dir.filePath(QStringLiteral("watched.FCBak"));
+    std::error_code error;
+    std::filesystem::rename(path.toStdWString(), backup.toStdWString(), error);
+    EXPECT_FALSE(error) << error.message();
+    std::filesystem::rename(other.toStdWString(), path.toStdWString(), error);
+    EXPECT_FALSE(error) << error.message();
+    EXPECT_EQ(QFileInfo(path).size(), 100);
+    // What was open stays readable as it was
+    EXPECT_EQ(file.readAll(), before);
+}
+
+TEST_F(DocumentWatcherSignature, SaveWithoutBackupWhileOpen)
+{
+    QFile original(path);
+    ASSERT_TRUE(original.open(QIODevice::ReadOnly));
+    const QByteArray before = original.readAll();
+    original.close();
+
+    QFile file;
+    ASSERT_TRUE(Gui::openSharedForReading(file, path));
+    const QString other = copyTo(QStringLiteral("other.FCStd"), 100);
+    std::error_code error;
+    std::filesystem::remove(path.toStdWString(), error);
+    EXPECT_FALSE(error) << error.message();
+    std::filesystem::rename(other.toStdWString(), path.toStdWString(), error);
+    EXPECT_FALSE(error) << error.message();
+    EXPECT_EQ(file.readAll(), before);
+    file.close();
+    EXPECT_EQ(QFileInfo(path).size(), 100);
+}
+
+TEST_F(DocumentWatcherSignature, SharedCopy)
+{
+    const QString target = dir.filePath(QStringLiteral("shared.FCStd"));
+    ASSERT_TRUE(Gui::copySharedFile(path, target));
+    EXPECT_TRUE(Gui::readFileSignature(target).sameContent(Gui::readFileSignature(path)));
+    EXPECT_EQ(QFileInfo(target).size(), QFileInfo(path).size());
+
+    EXPECT_FALSE(Gui::copySharedFile(dir.filePath(QStringLiteral("none")), target));
 }

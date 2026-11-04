@@ -33,6 +33,7 @@
 #include <fastsignals/connection.h>
 #include <FCGlobal.h>
 
+class QFile;
 class QFileSystemWatcher;
 class QTimer;
 
@@ -72,6 +73,15 @@ struct GuiExport FileSignature
 
 /// Stat the file and read the zip's central directory (no decompression).
 GuiExport FileSignature readFileSignature(const QString& path);
+
+/// Open the file for reading without keeping others from renaming it away or deleting it
+/// meanwhile, as FreeCAD's save does before it renames the new file in. QFile keeps them from it on
+/// Windows. There this is done only on volumes where a delete frees the name at once (NTFS, not
+/// SMB shares), and a rename over the open file still fails. The file stays readable as it was.
+GuiExport bool openSharedForReading(QFile& file, const QString& path);
+
+/// Copy 'source' to 'target', reading it as openSharedForReading() does.
+GuiExport bool copySharedFile(const QString& source, const QString& target);
 
 /**
  * Notices when the file of an open document is rewritten by another program and offers to
