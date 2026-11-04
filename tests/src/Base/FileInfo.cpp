@@ -3,6 +3,12 @@
 #include <Base/Stream.h>
 #include <Base/TimeInfo.h>
 #include <src/TempDirectory.h>
+#ifdef _WIN32
+# ifndef NOMINMAX
+#  define NOMINMAX
+# endif
+# include <windows.h>
+#endif
 
 class FileInfoTest: public ::testing::Test
 {
@@ -244,6 +250,11 @@ TEST_F(FileInfoPathConversionTest, WidePathToUtf8)
 
 TEST_F(FileInfoPathConversionTest, NaivePathStringLosesNonAscii)
 {
+    // With "Use Unicode UTF-8 for worldwide language support" set, the ANSI codepage is UTF-8 and
+    // the naive conversion happens to be right, so there is nothing to demonstrate
+    if (GetACP() == CP_UTF8) {
+        GTEST_SKIP() << "the ANSI codepage is UTF-8";
+    }
     // Demonstrate the actual bug: on Windows, fs::path::string() converts to the ANSI codepage,
     // which mangles non-ASCII characters. This is what the old code did (before PR #28222) and why
     // pathToString is needed.
