@@ -25,7 +25,6 @@
 #include <zlib.h>
 #include <App/License.h>
 #include <Gui/AutoSaver.h>
-#include <Gui/DocumentWatcher.h>
 
 #include "DlgSettingsDocumentImp.h"
 #include "ui_DlgSettingsDocument.h"
@@ -160,7 +159,6 @@ void DlgSettingsDocumentImp::saveSettings()
     ui->prefCanAbortRecompute->onSave();
     ui->prefEnableAsyncRecompute->onSave();
     ui->prefExternalChange->onSave();
-    DocumentWatcher::instance()->preferencesChanged();
 
     int timeout = ui->prefAutoSaveTimeout->value();
     if (!ui->prefAutoSaveEnabled->isChecked()) {

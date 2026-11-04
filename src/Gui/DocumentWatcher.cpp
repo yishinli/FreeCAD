@@ -20,6 +20,7 @@
  ******************************************************************************/
 
 #include <algorithm>
+#include <cstring>
 #include <set>
 #include <vector>
 
@@ -493,6 +494,19 @@ DocumentWatcher::DocumentWatcher(QObject* parent)
             }
         })
     );
+    // The setting changed by any means (the preferences page, a macro): pick up what changed
+    // meanwhile, rather than at the next look, which waits while FreeCAD is not the active program
+    connections.emplace_back(app.GetUserParameter().signalParamChanged.connect(
+        [this,
+         prefs = app.GetParameterGroupByPath(
+             "User parameter:BaseApp/Preferences/Document"
+         )](ParameterGrp* group, ParameterGrp::ParamType, const char* name, const char*) {
+            if (group == static_cast<ParameterGrp*>(prefs) && name
+                && std::strcmp(name, "ExternalChange") == 0) {
+                QTimer::singleShot(0, this, &DocumentWatcher::preferencesChanged);
+            }
+        }
+    ));
     connections.emplace_back(
         Application::Instance->signalDeleteDocument.connect([this](const Gui::Document&) {
             QTimer::singleShot(0, this, &DocumentWatcher::updateBars);
