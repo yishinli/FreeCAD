@@ -616,3 +616,26 @@ TEST_F(ReaderTest, validateXmlString)
     std::string result = Base::Persistence::validateXMLString(input);
     EXPECT_EQ(output, result);
 }
+
+TEST_F(ReaderTest, keepsMultiByteAttributesAcrossReadBuffers)
+{
+    // About 1 MB of attributes that are mostly 3-byte characters, so that the parser's reads
+    // end inside characters many times
+    std::string name;
+    for (int i = 0; i < 30; ++i) {
+        name += "\xE7\xB5\x84";  // U+7D44
+    }
+    const int count = 10000;
+    std::string data;
+    for (int i = 0; i < count; ++i) {
+        data += "<e n=\"" + name + std::to_string(i % 7) + "\"/>";
+    }
+    ReaderXML xml;
+    xml.givenDataAsXMLStream(data);
+
+    for (int i = 0; i < count; ++i) {
+        xml.Reader()->readElement("e");
+        ASSERT_EQ(xml.Reader()->getAttribute<const char*>("n"), name + std::to_string(i % 7))
+            << "element " << i;
+    }
+}

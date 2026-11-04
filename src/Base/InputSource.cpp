@@ -22,9 +22,12 @@
  *                                                                         *
  ***************************************************************************/
 
+#include <algorithm>
+#include <array>
 #include <istream>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "InputSource.h"
 #include "XMLTools.h"
@@ -161,17 +164,30 @@ void sanitizeUtf8Bytes(XMLByte* const toFill, const std::size_t len)
     }
 }
 
+// The number of bytes at the end of the buffer that start a multi-byte sequence the buffer cuts
+// short, or 0 when the buffer ends on a whole character.
+std::size_t incompleteTail(const XMLByte* const data, const std::size_t len)
+{
+    const std::size_t back = std::min<std::size_t>(len, 3);
+    for (std::size_t k = 1; k <= back; ++k) {
+        const std::uint8_t b = data[len - k];
+        if ((b & 0xC0) == 0x80) {
+            continue;
+        }
+        const std::size_t need = b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
+        return need > k ? k : 0;
+    }
+    return 0;
+}
+
 }  // namespace
 
 struct StdInputStream::TextCodec
 {
-    void validateBytes(XMLByte* const toFill, std::streamsize len)
-    {
-        if (len <= 0) {
-            return;
-        }
-        sanitizeUtf8Bytes(toFill, static_cast<std::size_t>(len));
-    }
+    // Bytes of a character the last read cut in two, kept for the next read, so that a
+    // character on the boundary of two reads is checked whole and not replaced with '?'
+    std::array<XMLByte, 3> carry {};
+    std::size_t carried = 0;
 };
 
 StdInputStream::StdInputStream(
@@ -193,7 +209,12 @@ StdInputStream::~StdInputStream() = default;
 // ---------------------------------------------------------------------------
 XMLFilePos StdInputStream::curPos() const
 {
-    return static_cast<XMLFilePos>(stream.tellg());
+    const auto pos = stream.tellg();
+    if (pos < 0) {
+        return static_cast<XMLFilePos>(pos);
+    }
+    // Bytes kept for the next read have not been handed on yet
+    return static_cast<XMLFilePos>(pos) - codec->carried;
 }
 
 XMLSize_t StdInputStream::readBytes(XMLByte* const toFill, const XMLSize_t maxToRead)
@@ -202,12 +223,30 @@ XMLSize_t StdInputStream::readBytes(XMLByte* const toFill, const XMLSize_t maxTo
     //  Read up to the maximum bytes requested. We return the number
     //  actually read.
     //
+    const std::size_t carried = std::min<std::size_t>(codec->carried, maxToRead);
+    std::memcpy(toFill, codec->carry.data(), carried);
+    std::memmove(codec->carry.data(), codec->carry.data() + carried, codec->carried - carried);
+    codec->carried -= carried;
+
+    const std::size_t wanted = maxToRead - carried;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    stream.read(reinterpret_cast<char*>(toFill), static_cast<std::streamsize>(maxToRead));
-    std::streamsize len = stream.gcount();
+    stream.read(reinterpret_cast<char*>(toFill + carried), static_cast<std::streamsize>(wanted));
+    const auto got = static_cast<std::size_t>(std::max<std::streamsize>(stream.gcount(), 0));
+    std::size_t len = carried + got;
 
-    codec->validateBytes(toFill, len);
+    // Keep a character cut short for the next read, unless the stream has ended (then it is
+    // invalid) or it is all this read has (returning 0 would end the input). Xerces always asks
+    // for its whole raw buffer (48 KiB), never for fewer bytes than are carried.
+    if (got == wanted && codec->carried == 0) {
+        const std::size_t tail = incompleteTail(toFill, len);
+        if (tail > 0 && tail < len) {
+            len -= tail;
+            std::memcpy(codec->carry.data(), toFill + len, tail);
+            codec->carried = tail;
+        }
+    }
 
+    sanitizeUtf8Bytes(toFill, len);
     return static_cast<XMLSize_t>(len);
 }
 
