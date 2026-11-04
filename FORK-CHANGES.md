@@ -39,7 +39,7 @@ its change (`git log <commit>`).
 | freecad-main-20261031-export-guard | 2026-10-31 | `1d66a5ee57`, `9bcec42850` |
 | freecad-main-20261101-measure | 2026-11-01 | `8eb1bb2a4a` … `395ac57d86` (inclusive) |
 | freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive; latest coworker build) |
-| Not built yet | | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file |
+| Not built yet | | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, `3758746687`, and this file |
 
 ## Section Analysis
 
@@ -201,6 +201,15 @@ waiting after opening 14–33 -> 2–4 s, memory after opening 2.07 -> 1.72 GB, 
 the first View Fit 26.2 and 3.5 -> 2.0 and 1.7 s.
 
 Known: a machine with fewer cores gains less on meshing.
+
+Not built yet.
+
+## Reading documents
+
+- `3758746687` Base: a non-ASCII character in Document.xml that a 48 KiB read cut in two is no longer
+  read as "???" (since upstream 3728496097). Names and labels on such a boundary came back wrong;
+  with a document loaded partially through a link from another document, an object name broken
+  this way in the dependency list left that object's children unloaded.
 
 Not built yet.
 
