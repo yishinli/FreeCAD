@@ -38,8 +38,9 @@ its change (`git log <commit>`).
 | freecad-main-20261031-navstyle | 2026-10-31 | `a105eb7600` … `8b806e6c00` (inclusive) |
 | freecad-main-20261031-export-guard | 2026-10-31 | `1d66a5ee57`, `9bcec42850` |
 | freecad-main-20261101-measure | 2026-11-01 | `8eb1bb2a4a` … `395ac57d86` (inclusive) |
-| freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive; latest coworker build) |
-| Not built yet | | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, `3758746687`, and this file |
+| freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive) |
+| freecad-main-20261104-reload | 2026-11-04 | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file (latest coworker build) |
+| Not built yet | | `3758746687` |
 
 ## Section Analysis
 
@@ -168,7 +169,7 @@ document that the reload already touched, made while the next file is being copi
 modified flag (not its content), so closing would not ask to save it; quitting during a reload that
 waits for a panel can leave the temporary copy behind.
 
-Not built yet.
+First built: reload.
 
 ## Opening large assemblies faster
 
@@ -202,7 +203,7 @@ the first View Fit 26.2 and 3.5 -> 2.0 and 1.7 s.
 
 Known: a machine with fewer cores gains less on meshing.
 
-Not built yet.
+First built: reload.
 
 ## Reading documents
 
@@ -221,4 +222,4 @@ Not built yet.
   uploaded as a runnable build (local test only, not for upstream).
 - `7e28530ed7` Gui: the shortcut style file comments name only the program each style follows.
 
-First built: section-step4; `95b8086053` in section-readonly; `7e28530ed7` not built yet.
+First built: section-step4; `95b8086053` in section-readonly; `7e28530ed7` in reload.
