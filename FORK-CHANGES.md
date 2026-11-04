@@ -39,8 +39,9 @@ its change (`git log <commit>`).
 | freecad-main-20261031-export-guard | 2026-10-31 | `1d66a5ee57`, `9bcec42850` |
 | freecad-main-20261101-measure | 2026-11-01 | `8eb1bb2a4a` … `395ac57d86` (inclusive) |
 | freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive) |
-| freecad-main-20261104-reload | 2026-11-04 | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file (latest coworker build) |
-| Not built yet | | `3758746687`, `30b83f6e76` |
+| freecad-main-20261104-reload | 2026-11-04 | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file |
+| freecad-main-20261104-utf8 | 2026-11-04 | `3758746687` and this file (latest coworker build) |
+| Not built yet | | `30b83f6e76` |
 
 ## Section Analysis
 
@@ -212,7 +213,7 @@ First built: reload.
   with a document loaded partially through a link from another document, an object name broken
   this way in the dependency list left that object's children unloaded.
 
-Not built yet.
+First built: utf8.
 
 ## Build fixes and CI (no user-visible change)
 
