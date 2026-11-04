@@ -39,7 +39,7 @@ its change (`git log <commit>`).
 | freecad-main-20261031-export-guard | 2026-10-31 | `1d66a5ee57`, `9bcec42850` |
 | freecad-main-20261101-measure | 2026-11-01 | `8eb1bb2a4a` … `395ac57d86` (inclusive) |
 | freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive; latest coworker build) |
-| Not built yet | | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, and this file |
+| Not built yet | | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file |
 
 ## Section Analysis
 
@@ -159,6 +159,8 @@ First built: explode.
   file kept (sharing delete there would let a save with backups off lose the file). Programs that
   rename a new file over the old one in one step (most editors) are refused for that moment
   everywhere, as Windows refuses them while anything reads the file.
+- `224b77e515` Gui: turning the setting back on, from the preferences or a macro, shows at once a change
+  made while it was off.
 
 Known: only one 3D view comes back after a reload, with its tab at the end; a file rewritten by
 FreeCADCmd has no GuiDocument.xml, so colours and visibility come back as defaults; an edit to a
