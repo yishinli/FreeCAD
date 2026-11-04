@@ -40,7 +40,7 @@ its change (`git log <commit>`).
 | freecad-main-20261101-measure | 2026-11-01 | `8eb1bb2a4a` … `395ac57d86` (inclusive) |
 | freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive) |
 | freecad-main-20261104-reload | 2026-11-04 | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file (latest coworker build) |
-| Not built yet | | `3758746687` |
+| Not built yet | | `3758746687`, `30b83f6e76` |
 
 ## Section Analysis
 
@@ -221,5 +221,7 @@ Not built yet.
 - `7f9c5adc51`, `feedb04e34`, `a60e041b25`, `ec6182dc5f` CI: Windows build on push to this branch,
   uploaded as a runnable build (local test only, not for upstream).
 - `7e28530ed7` Gui: the shortcut style file comments name only the program each style follows.
+- `30b83f6e76` Tests: the naive path test is skipped on Windows set to use UTF-8 as its codepage, where
+  its premise does not hold.
 
-First built: section-step4; `95b8086053` in section-readonly; `7e28530ed7` in reload.
+First built: section-step4; `95b8086053` in section-readonly; `7e28530ed7` in reload; `30b83f6e76` not built yet.
