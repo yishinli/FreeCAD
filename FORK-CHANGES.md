@@ -39,7 +39,7 @@ its change (`git log <commit>`).
 | freecad-main-20261031-export-guard | 2026-10-31 | `1d66a5ee57`, `9bcec42850` |
 | freecad-main-20261101-measure | 2026-11-01 | `8eb1bb2a4a` … `395ac57d86` (inclusive) |
 | freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive; latest coworker build) |
-| Not built yet | | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, and this file |
+| Not built yet | | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, and this file |
 
 ## Section Analysis
 
@@ -153,6 +153,12 @@ First built: explode.
   ask (default), reload when nothing is unsaved, or nothing.
 - `ff1514baee` Gui: Save and Save All ask first when the file changed on disk since it was opened,
   reloaded or saved here; the other version is kept as a backup file when backups are on.
+- `8108d30fb8` Gui: on Windows, on a local NTFS disk, the watched file is read with every share mode,
+  so a FreeCAD saving it (backups on or off) is not refused while it is checked or copied for a
+  reload. On a network share it is read as before: a save during that moment is refused and the
+  file kept (sharing delete there would let a save with backups off lose the file). Programs that
+  rename a new file over the old one in one step (most editors) are refused for that moment
+  everywhere, as Windows refuses them while anything reads the file.
 
 Known: only one 3D view comes back after a reload, with its tab at the end; a file rewritten by
 FreeCADCmd has no GuiDocument.xml, so colours and visibility come back as defaults; an edit to a
@@ -187,8 +193,12 @@ stores shapes in binary (BinTools version 3, read by older FreeCAD too) and open
 3.8 s faster with the same meshes; but everyone who saves the file must have it set, or the next
 save writes text again.
 
-Known: the numbers are from a 36-thread Linux machine; a laptop with fewer cores gains less on
-meshing. Windows not measured yet.
+On Windows (an 8-core laptop, `58a0025272`; another program kept the CPU at 93–99%, so the open
+wall time, about 60–75 s, did not compare): CPU time to open 80.5 and 83.0 -> 65.6 and 68.9 s,
+waiting after opening 14–33 -> 2–4 s, memory after opening 2.07 -> 1.72 GB, peak 2.37 -> 2.03 GB,
+the first View Fit 26.2 and 3.5 -> 2.0 and 1.7 s.
+
+Known: a machine with fewer cores gains less on meshing.
 
 Not built yet.
 
