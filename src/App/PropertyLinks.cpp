@@ -23,6 +23,7 @@
  ***************************************************************************/
 
 #include <algorithm>
+#include <map>
 #include <set>
 
 #include <QDir>
@@ -3804,9 +3805,15 @@ void PropertyLinkBase::breakLinks(App::DocumentObject* link,
 
 TYPESYSTEM_SOURCE(App::PropertyXLink, App::PropertyLink)
 
+namespace
+{
+std::map<const App::Document*, std::string>& savingTo();
+}  // namespace
+
 PropertyXLink::PropertyXLink(bool _allowPartial, PropertyLinkBase* parent)
     : parentProp(parent)
 {
+    savingTo();  // watch saves from the start, see relativeToOwner()
     setAllowPartial(_allowPartial);
     setAllowExternal(true);
     setSyncSubObject(true);
@@ -4196,6 +4203,59 @@ bool PropertyXLink::referenceChanged() const
     return !_mapped.empty();
 }
 
+namespace
+{
+/// The file each document is being written to, from signalStartSaveDocument to
+/// signalFinishSaveDocument. saveCopy() writes another file than FileName.
+std::map<const App::Document*, std::string>& savingTo()
+{
+    static std::map<const App::Document*, std::string> files;
+    static bool connected = false;
+    if (!connected) {
+        connected = true;
+        // Never disconnected: the application outlives every document.
+        auto& app = App::GetApplication();
+        app.signalStartSaveDocument.connect(
+            [](const App::Document& doc, const std::string& file) { files[&doc] = file; }
+        );
+        app.signalFinishSaveDocument.connect(
+            [](const App::Document& doc, const std::string&) { files.erase(&doc); }
+        );
+        app.signalDeleteDocument.connect([](const App::Document& doc) { files.erase(&doc); });
+    }
+    return files;
+}
+
+/// The path of `fullPath` relative to the folder `doc` is being saved in, or an
+/// empty string when `doc` has no file name yet or `fullPath` is a URI.
+std::string relativeToOwner(const char* fullPath, const App::Document* doc)
+{
+    const auto& saving = savingTo();
+    const auto it = doc ? saving.find(doc) : saving.end();
+    const char* docPath = it != saving.end() ? it->second.c_str()
+        : doc                                ? doc->getFileName()
+                                             : nullptr;
+    if (Base::Tools::isNullOrEmpty(docPath) || Base::Tools::isNullOrEmpty(fullPath)) {
+        return {};
+    }
+    const QString target = QString::fromUtf8(fullPath);
+    if (target.startsWith(QLatin1String("https://")) || !QFileInfo(target).isAbsolute()) {
+        return {};
+    }
+    // Resolve the folder, not the file: on a first save the file does not
+    // exist yet, and QFileInfo::canonicalPath() then answers "." (the working
+    // directory), which is how links came out relative to the working directory.
+    const QString folder = QFileInfo(QString::fromUtf8(docPath)).absolutePath();
+    QString canonical = QFileInfo(folder).canonicalFilePath();
+    if (canonical.isEmpty()) {
+        canonical = folder;
+    }
+    // Same spelling on both sides (links, case, 8.3 names) when the target exists.
+    const QString linked = QFileInfo(target).canonicalFilePath();
+    return QDir(canonical).relativeFilePath(linked.isEmpty() ? target : linked).toUtf8().constData();
+}
+}  // namespace
+
 void PropertyXLink::Save(Base::Writer& writer) const
 {
     auto owner = dynamic_cast<const DocumentObject*>(getContainer());
@@ -4236,6 +4296,15 @@ void PropertyXLink::Save(Base::Writer& writer) const
                     FC_WARN("PropertyXLink export without saving the document");
                 }
             }
+            if (!_path.empty()) {
+                path = _path.c_str();
+            }
+        }
+        else if (docInfo) {
+            // docInfo holds the full path of the linked file. Save it relative
+            // to where the owner is saved now, so that moving both folders
+            // together keeps the link, as before 26.3 rc2.
+            _path = relativeToOwner(docInfo->filePath(), owner->getDocument());
             if (!_path.empty()) {
                 path = _path.c_str();
             }
