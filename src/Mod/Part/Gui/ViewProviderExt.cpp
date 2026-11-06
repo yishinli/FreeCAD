@@ -95,6 +95,7 @@
 #include <Gui/ViewParams.h>
 #include <Gui/Utilities.h>
 #include <Gui/View3DInventor.h>
+#include <Gui/View3DInventorViewer.h>
 
 #include <Mod/Part/App/ShapeMapHasher.h>
 #include <Mod/Part/App/Tools.h>
@@ -428,7 +429,13 @@ private:
         if (guiDoc && !guiDoc->restoredGuiDocument()) {
             for (auto* mdiView : guiDoc->getMDIViews()) {
                 if (auto* view3D = freecad_cast<Gui::View3DInventor*>(mdiView)) {
-                    view3D->viewAll();
+                    // Without animation: Gui::Document has just animated a fit to what was
+                    // drawn then, and each frame of another one redraws the whole document
+                    Gui::View3DInventorViewer* viewer = view3D->getViewer();
+                    const bool animate = viewer->isAnimationEnabled();
+                    viewer->setAnimationEnabled(false);
+                    viewer->viewAll();
+                    viewer->setAnimationEnabled(animate);
                     break;
                 }
             }
