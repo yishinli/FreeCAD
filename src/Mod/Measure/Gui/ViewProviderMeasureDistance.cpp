@@ -499,8 +499,8 @@ void ViewProviderMeasureDistance::redrawAnnotation()
     // Set the distance
     fieldDistance = (vec2 - vec1).Length();
 
-    auto propDistance = dynamic_cast<App::PropertyDistance*>(pcObject->getPropertyByName("Distance"));
-    setLabelValue(propDistance->getQuantityValue().getUserString());
+    auto* measureObject = getMeasureObject();
+    setLabelValue(measureObject->getResultString());
 
     // Set delta distance. A zero one has no length to draw, and its label would
     // cover the next one's, so only the task panel shows it.
@@ -509,10 +509,12 @@ void ViewProviderMeasureDistance::redrawAnnotation()
     };
     for (int i = 0; i < 3; ++i) {
         auto prop = static_cast<App::PropertyDistance*>(
-            getMeasureObject()->getPropertyByName(deltas[i].first)
+            measureObject->getPropertyByName(deltas[i].first)
         );
         deltaDimension(pDeltaDimensionSwitch, i)
-            ->text.setValue((deltas[i].second + prop->getQuantityValue().getUserString()).c_str());
+            ->text.setValue(
+                (deltas[i].second + measureObject->formatQuantity(prop->getQuantityValue())).c_str()
+            );
         static_cast<SoSwitch*>(pDeltaDimensionSwitch->getChild(i))
             ->whichChild.setValue(
                 prop->getValue() > Precision::Confusion() ? SO_SWITCH_ALL : SO_SWITCH_NONE

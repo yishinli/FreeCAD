@@ -171,7 +171,7 @@ void DlgCustomKeyboardImp::initCommandCompleter(
             return;
         }
 
-        QString group = QString::fromLatin1(cmd->getGroupName());
+        QString group = QString::fromUtf8(cmd->getGroupName());
         int index = combo->findData(group);
         if (index < 0) {
             return;

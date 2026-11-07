@@ -29,6 +29,7 @@ import os
 import FreeCAD
 import Path.Base.Util as PathUtil
 import Path.Dressup.Utils as PathDressup
+from Path.Post import Utils as PostUtils
 from PathScripts import PathUtils
 import CAMSimulator
 
@@ -343,8 +344,9 @@ class CAMSimulation:
             toolNumber = PathDressup.toolController(op).ToolNumber
             toolProfile = self.GetToolProfile(tool, 0.5)
             self.millSim.AddTool(toolProfile, toolNumber, tool.Diameter, 1)
-            opCommands = PathUtils.getPathWithPlacement(op).Commands
-            for cmd in opCommands:
+            path = PathUtils.getPathWithPlacement(op)
+            # the drill cycles' G98, G99 and G80 as the post writes them
+            for cmd in PostUtils.cannedCycleTerminator(path).Commands:
                 self.millSim.AddCommand(cmd)
         self.millSim.BeginSimulation(self.stock, self.quality)
         if self.baseShape is not None:
@@ -361,9 +363,9 @@ class CommandCAMSimulate:
         """Command info"""
         return {
             "Pixmap": "CAM_SimulatorGL",
-            "MenuText": QtCore.QT_TRANSLATE_NOOP("CAM_Simulator", "CAM Simulator"),
+            "MenuText": QtCore.QT_TRANSLATE_NOOP("CAM_SimulatorGL", "CAM Simulator"),
             "Accel": "P, N",
-            "ToolTip": QtCore.QT_TRANSLATE_NOOP("CAM_Simulator", "Simulates G-code on stock"),
+            "ToolTip": QtCore.QT_TRANSLATE_NOOP("CAM_SimulatorGL", "Simulates G-code on stock"),
         }
 
     def IsActive(self):

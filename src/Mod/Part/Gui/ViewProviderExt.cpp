@@ -1259,7 +1259,7 @@ bool ViewProviderPartExt::loadParameter()
         "User parameter:BaseApp/Preferences/Mod/Part"
     );
     float deviation = hGrp->GetFloat("MeshDeviation", 0.2);
-    float angularDeflection = hGrp->GetFloat("MeshAngularDeflection", 28.65);
+    float angularDeflection = hGrp->GetFloat("MeshAngularDeflection", 28.5);
     NormalsFromUV = hGrp->GetBool("NormalsFromUVNodes", NormalsFromUV);
 
     // The properties keep the float of the parameter, but a document saves them
@@ -1270,6 +1270,7 @@ bool ViewProviderPartExt::loadParameter()
     }
     if (static_cast<float>(AngularDeflection.getValue()) != angularDeflection) {
         AngularDeflection.setValue(angularDeflection);
+        changed = true;
     }
 
     return changed;

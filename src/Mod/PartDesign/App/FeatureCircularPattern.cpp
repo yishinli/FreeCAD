@@ -3,7 +3,6 @@
 #include "FeatureCircularPattern.h"
 
 #include <Mod/Part/App/Tools.h>
-
 #include <gp_Dir.hxx>
 
 #include "DatumLine.h"
@@ -15,12 +14,6 @@ PROPERTY_SOURCE_WITH_EXTENSIONS(PartDesign::CircularPattern, PartDesign::Transfo
 CircularPattern::CircularPattern()
 {
     Part::CircularPatternExtension::initExtension(this);
-    Part::CircularPatternExtension::setIncludeIdentityTransformation(true);
-}
-
-bool CircularPattern::deleteOriginalTransformation() const
-{
-    return identityTransformSuppressed();
 }
 
 const std::list<gp_Trsf> CircularPattern::getTransformations(const std::vector<App::DocumentObject*>)
@@ -28,7 +21,7 @@ const std::list<gp_Trsf> CircularPattern::getTransformations(const std::vector<A
     return calculateTransformations();
 }
 
-gp_Ax2 CircularPattern::getRotation(const App::PropertyLinkSub& property) const
+std::optional<gp_Ax2> CircularPattern::getAxis(const App::PropertyLinkSub& property) const
 {
     if (auto* line = freecad_cast<PartDesign::Line*>(property.getValue())) {
         const Base::Vector3d point = line->getBasePoint();
@@ -42,5 +35,5 @@ gp_Ax2 CircularPattern::getRotation(const App::PropertyLinkSub& property) const
         return gp_Ax2(base, direction);
     }
 
-    return Part::CircularPatternExtension::getRotation(property);
+    return Part::CircularPatternExtension::getAxis(property);
 }

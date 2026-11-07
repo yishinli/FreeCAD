@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileNotice: Part of the FreeCAD project.
+
 # ==============================================================================
 # File Management
 # Define the source files and resources of the BIM workbench
@@ -216,7 +219,6 @@ SET(nativeifc_SRCS
     nativeifc/ifc_observer.py
     nativeifc/ifc_performance_test.py
     nativeifc/ifc_psets.py
-    nativeifc/ifc_selftest.py
     nativeifc/ifc_status.py
     nativeifc/ifc_tools.py
     nativeifc/ifc_tree.py
@@ -266,6 +268,8 @@ SET(bimtests_SRCS
     bimtests/TestArchTruss.py
     bimtests/TestWebGLExport.py
     bimtests/TestWebGLExportGui.py
+    bimtests/TestNativeIfc.py
+    bimtests/TestNativeIfcGui.py
     bimtests/TestArchImportersGui.py
     bimtests/TestArchBuildingPartGui.py
     bimtests/TestArchStairsGui.py
