@@ -42,7 +42,7 @@ its change (`git log <commit>`).
 | freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive) |
 | freecad-main-20261104-reload | 2026-11-04 | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file |
 | freecad-main-20261104-utf8 | 2026-11-04 | `3758746687` and this file (latest coworker build) |
-| Not built yet | | `30b83f6e76`, `ba0f5e1899`, upstream main up to `5ce3b8804d` (merge `16a27e9901`), `dde80a9ed9` |
+| Not built yet | | `30b83f6e76`, `ba0f5e1899`, upstream main up to `5ce3b8804d` (merge `16a27e9901`), `dde80a9ed9`, `1795c14dfc` |
 
 ## Section Analysis
 
