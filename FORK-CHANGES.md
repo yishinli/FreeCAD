@@ -4,7 +4,8 @@ What this branch adds on top of FreeCAD main, sorted by feature, with the build 
 shipped in and the limits we know of. It is the summary; each commit message is the full record of
 its change (`git log <commit>`).
 
-- Base: FreeCAD main at merge base `3cd29aa88e`.
+- Base: FreeCAD main `5ce3b8804d` (2026-11-06), merged in `16a27e9901`; before that, merge base
+  `3cd29aa88e`.
 - Merged open upstream PRs (not ours): #28647 Part::SectionAnalysis (head `d2e5af9371`) and #33186
   section caps on the clipping plane (head `6985eb3a8d`).
 - Everything else here is fork only. Nothing here is proposed upstream; the fork owner writes any
@@ -41,7 +42,7 @@ its change (`git log <commit>`).
 | freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive) |
 | freecad-main-20261104-reload | 2026-11-04 | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file |
 | freecad-main-20261104-utf8 | 2026-11-04 | `3758746687` and this file (latest coworker build) |
-| Not built yet | | `30b83f6e76` |
+| Not built yet | | `30b83f6e76`, `ba0f5e1899`, upstream main up to `5ce3b8804d` (merge `16a27e9901`), `dde80a9ed9` |
 
 ## Section Analysis
 
@@ -102,7 +103,9 @@ First built: navstyle; Shift+M in measure; Fusion style in explode.
 ## Measuring and preferences
 
 - `8eb1bb2a4a` Part: Apply in Preferences no longer resets every Part object's deviation and marks
-  documents modified when nothing on the page changed.
+  documents modified when nothing on the page changed. Since merge `16a27e9901`, upstream #33440
+  does this instead: Apply never changes existing objects, and a separate button applies the values
+  to them. The page's defaults (0.2, 28.65 deg) and float compare from this change stay.
 - `5a4dba1093` Measure: measuring leaves the document unmodified unless a measurement is saved.
 - `3208146c40` Measure: a distance to a hole, boss or half hole is measured from its axis.
 - `8c70a3c49e` Measure: a zero dx/dy/dz is not drawn over the others.
@@ -191,6 +194,9 @@ icons and colours.
   every geometry view provider (1.3 s and 320 MB on that assembly).
 - `7788ede697` App: the default appearance is read once per restore instead of once per view
   provider.
+- `ba0f5e1899` PartGui: after meshing a document without GuiDocument.xml, the view is fit without
+  animation. With animation, each frame redrew the whole document: a 15,000-object test file took
+  230 s to open under Xvfb, 125 s with this change.
 
 Tip, no code: saving with the hidden preference `BaseApp/Preferences/Document/SaveBinaryBrep = true`
 stores shapes in binary (BinTools version 3, read by older FreeCAD too) and opened that assembly a further
@@ -214,6 +220,12 @@ First built: reload.
   this way in the dependency list left that object's children unloaded.
 
 First built: utf8.
+
+- `dde80a9ed9` App: a link to an object in another document (XLink) is saved relative to the file
+  being written, also with Save As and Save a Copy. Upstream `24ea8589aa` (in the merge
+  `16a27e9901`) saved it as an absolute path, so moving a project folder broke its links.
+
+Not built yet.
 
 ## Build fixes and CI (no user-visible change)
 
