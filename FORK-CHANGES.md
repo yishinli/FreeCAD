@@ -105,7 +105,8 @@ First built: navstyle; Shift+M in measure; Fusion style in explode.
 - `8eb1bb2a4a` Part: Apply in Preferences no longer resets every Part object's deviation and marks
   documents modified when nothing on the page changed. Since merge `16a27e9901`, upstream #33440
   does this instead: Apply never changes existing objects, and a separate button applies the values
-  to them. The page's defaults (0.2, 28.65 deg) and float compare from this change stay.
+  to them. The page's deviation default 0.2 and the float compare from this change stay; upstream
+  moved the angle default to 28.5 deg and the page follows it.
 - `5a4dba1093` Measure: measuring leaves the document unmodified unless a measurement is saved.
 - `3208146c40` Measure: a distance to a hole, boss or half hole is measured from its axis.
 - `8c70a3c49e` Measure: a zero dx/dy/dz is not drawn over the others.

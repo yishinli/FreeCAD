@@ -106,7 +106,7 @@
            <double>0.5</double>
           </property>
           <property name="value">
-           <double>28.65</double>
+           <double>28.5</double>
           </property>
           <property name="prefEntry" stdset="0">
            <cstring>MeshAngularDeflection</cstring>
