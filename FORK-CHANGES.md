@@ -43,7 +43,7 @@ its change (`git log <commit>`).
 | freecad-main-20261104-reload | 2026-11-04 | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file |
 | freecad-main-20261104-utf8 | 2026-11-04 | `3758746687` and this file |
 | freecad-main-20261107-upstream | 2026-11-07 | `30b83f6e76`, `ba0f5e1899`, upstream main up to `5ce3b8804d` (merge `16a27e9901`), `dde80a9ed9`, `1795c14dfc`, and this file (latest coworker build) |
-| Not built yet | | none |
+| Not built yet | | `553f3233bf` and this file |
 
 ## Section Analysis
 
@@ -228,6 +228,15 @@ First built: utf8.
   `16a27e9901`) saved it as an absolute path, so moving a project folder broke its links.
 
 First built: upstream.
+
+## Upstream fixes picked ahead of a merge
+
+- `553f3233bf` (cherry-pick of upstream `362dd8741c`) Assembly bill of materials: a link with a
+  negative Scale is listed on its own "(mirrored)" row again. Without it every child was read as a
+  link element, so mirrored links were counted with the unmirrored part, and plain parts were read
+  through the wrong type. The next merge of upstream main brings the same change.
+
+First built: not yet.
 
 ## Build fixes and CI (no user-visible change)
 
