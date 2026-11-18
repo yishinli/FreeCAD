@@ -22,6 +22,7 @@
 import Arch
 import ArchSectionPlane
 import Draft
+import Part
 import os
 import FreeCAD as App
 from bimtests import TestArchBase
@@ -39,7 +40,14 @@ class TestArchSectionPlane(TestArchBase.TestArchBase):
 
     def _create_TD_page(self):
         tpath = os.path.join(
-            App.getResourceDir(), "Mod", "TechDraw", "Templates", "ISO", "A3_Landscape_blank.svg"
+            App.getResourceDir(),
+            "Mod",
+            "TechDraw",
+            "Templates",
+            "Blank",
+            "A3",
+            "landscape",
+            "A3_blank_landscape.svg",
         )
         page = App.ActiveDocument.addObject("TechDraw::DrawPage", "Page")
         template = App.ActiveDocument.addObject("TechDraw::DrawSVGTemplate", "Template")
@@ -225,3 +233,21 @@ class TestArchSectionPlane(TestArchBase.TestArchBase):
         page.addView(view)
         App.ActiveDocument.recompute()
         self.assertTrue("A" in view.Symbol)
+
+    def testCutVolumeClipWhenPlaneCutsNothing(self):
+        """Clip and Depth still apply when the section plane cuts nothing."""
+
+        box = Part.makeBox(10, 10, 10)
+        above = Part.makePlane(4, 4, App.Vector(3, 3, 20))
+        below = Part.makePlane(4, 4, App.Vector(3, 3, -20))
+
+        self.assertEqual(Arch.getCutVolume(above, [box]), (None, None, None))
+
+        cutvolume = Arch.getCutVolume(above, [box], clip=True)[1]
+        self.assertAlmostEqual(box.cut(cutvolume).Volume, 160)
+
+        cutvolume = Arch.getCutVolume(below, [box], clip=True)[1]
+        self.assertAlmostEqual(box.cut(cutvolume).Volume, 0)
+
+        cutvolume = Arch.getCutVolume(above, [box], depth=15)[1]
+        self.assertAlmostEqual(box.cut(cutvolume).Volume, 500)

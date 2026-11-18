@@ -156,6 +156,12 @@ LinearGizmo::LinearGizmo(QuantitySpinBox* property)
     this->property = property;
 }
 
+LinearGizmo::~LinearGizmo()
+{
+    QuantitySpinBox::disconnect(quantityChangedConnection);
+    QuantitySpinBox::disconnect(formulaDialogConnection);
+}
+
 SoInteractionKit* LinearGizmo::initDragger()
 {
     draggerContainer = new SoLinearDraggerContainer;
@@ -388,6 +394,9 @@ RotationGizmo::RotationGizmo(QuantitySpinBox* property)
 
 RotationGizmo::~RotationGizmo()
 {
+    QuantitySpinBox::disconnect(quantityChangedConnection);
+    QuantitySpinBox::disconnect(formulaDialogConnection);
+
     translationSensor.detach();
     translationSensor.setData(nullptr);
     translationSensor.setFunction(nullptr);
