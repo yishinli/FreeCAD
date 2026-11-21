@@ -44,7 +44,7 @@ its change (`git log <commit>`).
 | freecad-main-20261104-utf8 | 2026-11-04 | `3758746687` and this file |
 | freecad-main-20261107-upstream | 2026-11-07 | `30b83f6e76`, `ba0f5e1899`, upstream main up to `5ce3b8804d` (merge `16a27e9901`), `dde80a9ed9`, `1795c14dfc`, and this file |
 | freecad-main-20261118-upstream | 2026-11-18 | `553f3233bf`, upstream main up to `51089c6d8e` (merge `b969cb9567`; the bundled Coin moves to `e2a264be63`, which no longer uses Fontconfig on Windows unless asked), and this file (latest coworker build) |
-| Not built yet | | none |
+| Not built yet | | `5baafa387b` and this file |
 
 ## Section Analysis
 
@@ -229,6 +229,14 @@ First built: utf8.
   `16a27e9901`) saved it as an absolute path, so moving a project folder broke its links.
 
 First built: 20261107-upstream.
+
+- `5baafa387b` Base: a rotation set from a quaternion (STEP import, matrices, products) takes its
+  angle from atan2 instead of acos. A document saves the angle and axis and restores the rotation
+  from them; with acos a small turn (about 1e-7 rad, as Fusion exports leave) came back changed
+  after the first save, and a turn so small that w is exactly 1 came back as none. Restore is
+  unchanged. Saving a document again rewrites the last digits of such angles and axes.
+
+First built: not yet.
 
 ## Upstream fixes picked ahead of a merge
 
