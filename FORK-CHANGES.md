@@ -42,8 +42,9 @@ its change (`git log <commit>`).
 | freecad-main-20261101-explode | 2026-11-01 | `eddd58c478` … `2fd61741ee` (inclusive) |
 | freecad-main-20261104-reload | 2026-11-04 | `d351d40155` … `7788ede697` (inclusive), `7e28530ed7`, `8108d30fb8`, `224b77e515`, and this file |
 | freecad-main-20261104-utf8 | 2026-11-04 | `3758746687` and this file |
-| freecad-main-20261107-upstream | 2026-11-07 | `30b83f6e76`, `ba0f5e1899`, upstream main up to `5ce3b8804d` (merge `16a27e9901`), `dde80a9ed9`, `1795c14dfc`, and this file (latest coworker build) |
-| Not built yet | | `553f3233bf`, upstream main up to `51089c6d8e` (merge `b969cb9567`; the bundled Coin moves to `e2a264be63`, which no longer uses Fontconfig on Windows unless asked), and this file |
+| freecad-main-20261107-upstream | 2026-11-07 | `30b83f6e76`, `ba0f5e1899`, upstream main up to `5ce3b8804d` (merge `16a27e9901`), `dde80a9ed9`, `1795c14dfc`, and this file |
+| freecad-main-20261118-upstream | 2026-11-18 | `553f3233bf`, upstream main up to `51089c6d8e` (merge `b969cb9567`; the bundled Coin moves to `e2a264be63`, which no longer uses Fontconfig on Windows unless asked), and this file (latest coworker build) |
+| Not built yet | | none |
 
 ## Section Analysis
 
@@ -114,7 +115,7 @@ First built: navstyle; Shift+M in measure; Fusion style in explode.
 - `2bb07d0b93` Measure: closing Std_Measure without saving leaves no empty undo step.
 - `faff898899` Measure: Mass Properties closed by a macro removes its preview.
 
-First built: measure; the last two in explode; the upstream #33440 behaviour and 28.5 in upstream.
+First built: measure; the last two in explode; the upstream #33440 behaviour and 28.5 in 20261107-upstream.
 
 ## Inspection: interference and parts list
 
@@ -212,7 +213,7 @@ the first View Fit 26.2 and 3.5 -> 2.0 and 1.7 s.
 
 Known: a machine with fewer cores gains less on meshing.
 
-First built: reload; `ba0f5e1899` in upstream.
+First built: reload; `ba0f5e1899` in 20261107-upstream.
 
 ## Reading documents
 
@@ -227,7 +228,7 @@ First built: utf8.
   being written, also with Save As and Save a Copy. Upstream `24ea8589aa` (in the merge
   `16a27e9901`) saved it as an absolute path, so moving a project folder broke its links.
 
-First built: upstream.
+First built: 20261107-upstream.
 
 ## Upstream fixes picked ahead of a merge
 
@@ -237,7 +238,7 @@ First built: upstream.
   through the wrong type. Merge `b969cb9567` then brought upstream's own copy, so the two are one
   change.
 
-First built: not yet.
+First built: 20261118-upstream.
 
 ## Build fixes and CI (no user-visible change)
 
@@ -249,4 +250,4 @@ First built: not yet.
 - `30b83f6e76` Tests: the naive path test is skipped on Windows set to use UTF-8 as its codepage, where
   its premise does not hold.
 
-First built: section-step4; `95b8086053` in section-readonly; `7e28530ed7` in reload; `30b83f6e76` in upstream.
+First built: section-step4; `95b8086053` in section-readonly; `7e28530ed7` in reload; `30b83f6e76` in 20261107-upstream.
