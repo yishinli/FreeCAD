@@ -44,7 +44,7 @@ its change (`git log <commit>`).
 | freecad-main-20261104-utf8 | 2026-11-04 | `3758746687` and this file |
 | freecad-main-20261107-upstream | 2026-11-07 | `30b83f6e76`, `ba0f5e1899`, upstream main up to `5ce3b8804d` (merge `16a27e9901`), `dde80a9ed9`, `1795c14dfc`, and this file |
 | freecad-main-20261118-upstream | 2026-11-18 | `553f3233bf`, upstream main up to `51089c6d8e` (merge `b969cb9567`; the bundled Coin moves to `e2a264be63`, which no longer uses Fontconfig on Windows unless asked), and this file (latest coworker build) |
-| Not built yet | | `5baafa387b` and this file |
+| Not built yet | | `5baafa387b`, `354a187270` and this file |
 
 ## Section Analysis
 
@@ -235,6 +235,17 @@ First built: 20261107-upstream.
   from them; with acos a small turn (about 1e-7 rad, as Fusion exports leave) came back changed
   after the first save, and a turn so small that w is exactly 1 came back as none. Restore is
   unchanged. Saving a document again rewrites the last digits of such angles and axes.
+
+First built: not yet.
+
+## Scripts run by FreeCADCmd
+
+- `354a187270` Gui: a script run by FreeCADCmd that calls `FreeCADGui.showMainWindow()` no longer
+  crashes when FreeCAD exits after the script (SIGSEGV; the shell showed exit code 139 on Linux).
+  The workbench manipulators (Addon Manager adds one at startup, BIM another) were freed after
+  Python had shut down; they are now removed before. The crash came after the script and the
+  settings files were done, so what such scripts produced was not affected, only the exit code.
+  The "Not detached all observers yet" lines printed at exit remain; they are only messages.
 
 First built: not yet.
 
