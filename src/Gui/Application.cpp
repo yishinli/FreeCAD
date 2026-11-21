@@ -52,6 +52,7 @@
 #include <list>
 #include <ranges>
 
+#include <App/CleanupProcess.h>
 #include <App/Document.h>
 #include <App/DocumentObjectPy.h>
 #include <App/MainThreadSignal.h>
@@ -516,6 +517,11 @@ void Application::initStyleParameterManager()
 Application::Application(bool GUIenabled)
 {
     // App::GetApplication().Attach(this);
+    // When FreeCADCmd runs a script that calls FreeCADGui.showMainWindow(), this object is never
+    // deleted, so the destructor does not remove the workbench manipulators. The static set
+    // holding them was then destroyed at exit, after Python had been finalized, and a manipulator
+    // written in Python crashed in PyGILState_Ensure. Remove them while Python is still running.
+    App::CleanupProcess::registerCleanup([]() { WorkbenchManipulator::removeAll(); });
     if (GUIenabled) {
         App::MainThreadSignalConfig::setHooks(&qtIsMainThread, &qtInvokeOnMain);
 
