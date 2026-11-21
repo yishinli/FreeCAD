@@ -22,6 +22,7 @@
  *                                                                         *
  ***************************************************************************/
 
+#include <cmath>
 #include <limits>
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -112,20 +113,25 @@ void Rotation::evaluateVector()
 {
     // Taken from <http://de.wikipedia.org/wiki/Quaternionen>
     //
-    // Note: -1 < w < +1 (|w| == 1 not allowed, with w:=quat[3])
-    if ((this->quat[3] > -1.0) && (this->quat[3] < 1.0)) {
-        double rfAngle = acos(this->quat[3]) * 2.0;
-        double scale = sin(rfAngle / 2.0);
-        // Get a normalized vector
+    // The angle comes from atan2 of the vector part's length and w, not from acos(w): near w = +-1
+    // acos loses most of the digits (an angle of 1.748e-7 rad came out as 1.738e-7 or 1.763e-7,
+    // depending on the last bit of w), and the angle and axis are what a document saves and
+    // restores the rotation from. Saved with 16 decimals, a very small angle keeps fewer digits
+    // (about 4 at 1e-12), which is harmless in absolute terms.
+    const double s = std::sqrt(
+        this->quat[0] * this->quat[0] + this->quat[1] * this->quat[1] + this->quat[2] * this->quat[2]
+    );
+    if (s > 0.0) {
+        // Keep the length the axis had
         double l = this->_axis.Length();
         if (l < Base::Vector3d::epsilon()) {
             l = 1;
         }
-        this->_axis.x = this->quat[0] * l / scale;
-        this->_axis.y = this->quat[1] * l / scale;
-        this->_axis.z = this->quat[2] * l / scale;
+        this->_axis.x = this->quat[0] * l / s;
+        this->_axis.y = this->quat[1] * l / s;
+        this->_axis.z = this->quat[2] * l / s;
 
-        _angle = rfAngle;
+        _angle = std::atan2(s, this->quat[3]) * 2.0;
     }
     else {
         _axis.Set(0.0, 0.0, 1.0);
