@@ -43,14 +43,3 @@ and test commands you ran, and one fix per commit.
 Replies on issues and pull requests in this repository are usually written by an AI agent (Claude)
 working for the maintainer, on the maintainer's account. Merges are always decided by the
 maintainer. Answers can take a few days.
-
-## 中文說明
-
-這是 FreeCAD 的非官方 fork，與 FreeCAD 官方專案無關。除了合併進來的兩個 FreeCAD 官方尚未合併的 PR
-（列在 [FORK-CHANGES.md](../FORK-CHANGES.md)），修改都由 AI 撰寫、測試與審查，由維護者決定是否合併。
-所有修改都列在 FORK-CHANGES.md（英文）；我們的每個修正都是獨立的 commit，可以單獨 cherry-pick
-（授權與 FreeCAD 相同，LGPL-2.1-or-later）。歡迎用 AI 撰寫的 issue 與 pull request，規則見
-[CONTRIBUTING.md](CONTRIBUTING.md)。
-要把修正送進 FreeCAD 官方，請先讀官方的 [AI 政策](https://github.com/FreeCAD/FreeCAD/blob/main/AI_POLICY.md)：
-你必須完全理解、審查並測試要送出的內容，註明 AI 協助，issue、PR 與回覆都由你本人撰寫；官方不接受明顯由 AI
-產生的程式碼。這裡的 commit 指出問題在哪、示範一種修法，不能原封不動送出。我們不會代替任何人送到官方。
