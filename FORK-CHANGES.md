@@ -259,6 +259,14 @@ First built: not yet.
 
 First built: 20261118-upstream.
 
+## Fork pages on GitHub (no change to FreeCAD)
+
+- `efd23594bb` The fork's own landing page and contribution rules: `.github/README.md` and
+  `.github/CONTRIBUTING.md` (GitHub shows them before the root files, which stay upstream's), a
+  rewritten `.github/pull_request_template.md`, one issue form in place of upstream's three, and a
+  note at the top of `AGENTS.md`. When an upstream merge conflicts on the PR template, the issue
+  forms or the top of `AGENTS.md`, keep this fork's version (upstream's issue forms stay deleted).
+
 ## Build fixes and CI (no user-visible change)
 
 - `91b5b35188`, `6cb024f845`, `95b8086053` MSVC build fixes (WireJoiner include, std::string in a
