@@ -1,3 +1,9 @@
+> **In this fork (yishinli/FreeCAD).** This repository is an AI-maintained fork, not FreeCAD
+> itself. Here, agents may write issues, pull requests, comments and commit messages; see
+> [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). The engineering guidance below still applies.
+> The rules below about not communicating on GitHub apply to FreeCAD's own repository and
+> channels: anything sent there is written by a human, as FreeCAD's AI_POLICY.md requires.
+
 # Working with agents in FreeCAD
 
 These instructions apply to AI-assisted work in this repository, regardless of model or tool.

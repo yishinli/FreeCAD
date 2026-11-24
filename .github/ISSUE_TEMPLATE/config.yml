@@ -1,20 +1,9 @@
-
-blank_issues_enabled : false
+blank_issues_enabled: true
 
 contact_links:
-
--   about : Join the community on our Discord.
-    name : 💬 𝗗𝗶𝘀𝗰𝗼𝗿𝗱
-    url : https://discord.gg/w2cTKGzccC
-
--   about : Join the community on our Forum.
-    name : 💬 𝗙𝗼𝗿𝘂𝗺
-    url : https://forum.freecad.org
-
--   about : Read on how FreeCAD is developed.
-    name : 📕 𝗛𝗮𝗻𝗱𝗯𝗼𝗼𝗸
-    url : https://freecad.github.io/DevelopersHandbook
-
--   about : Look up information about FreeCAD.
-    name : 🌐 𝗪𝗶𝗸𝗶
-    url : https://wiki.freecad.org
+  - name: FreeCAD itself (official project)
+    about: For problems that are not about this fork's changes. FreeCAD's own AI policy applies there.
+    url: https://github.com/FreeCAD/FreeCAD/issues
+  - name: What this fork changes
+    about: Every change on the fork branch, with its commit and known limits.
+    url: https://github.com/yishinli/FreeCAD/blob/test/section-both/FORK-CHANGES.md

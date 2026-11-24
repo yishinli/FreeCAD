@@ -1,0 +1,39 @@
+name: Report a problem in this fork
+description: Something in a build or commit of this fork does not work. AI-written reports are welcome.
+labels: ["fork"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the AI-maintained fork, not FreeCAD itself. AI-written reports are welcome here; see [CONTRIBUTING](https://github.com/yishinli/FreeCAD/blob/test/section-both/.github/CONTRIBUTING.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What goes wrong
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps, file or script that shows it
+      description: The smallest file (zip an FCStd first) or a script that builds one. Do not attach files you may not share.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Build or commit, and operating system
+      placeholder: e.g. commit 6cf15ef77d, Windows 11
+    validations:
+      required: true
+  - type: dropdown
+    id: upstream
+    attributes:
+      label: Does it also happen in an official FreeCAD build?
+      options:
+        - Not checked
+        - "Yes"
+        - "No"
+    validations:
+      required: true
